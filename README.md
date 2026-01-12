@@ -46,11 +46,15 @@ engineer to continue this work. Save to ~/Documents/docs/...
 
 Run `/save-progress-doc`, Haiku generates the doc, then you're automatically back on Opus for your next task.
 
-## Location
+## Installation
 
-`~/.pi/agent/extensions/pi-prompt-template-model/`
+Clone into your pi extensions directory:
 
-Auto-discovered by pi from `~/.pi/agent/extensions/*/index.ts`.
+```bash
+git clone https://github.com/nicobailon/pi-prompt-template-model.git ~/.pi/agent/extensions/pi-prompt-template-model
+```
+
+Pi auto-discovers extensions from `~/.pi/agent/extensions/*/index.ts`, so no config changes needed. Just restart pi.
 
 ## Adding a Model to a Prompt Template
 
