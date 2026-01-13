@@ -1,6 +1,6 @@
 # Prompt Template Model Extension
 
-Adds `model`, `skill`, and `thinking` frontmatter support to prompt templates. Create specialized agent modes that switch to the right model, set thinking level, and inject the right skill, then auto-restore when done.
+**Pi prompt templates on steroids.** Adds `model`, `skill`, and `thinking` frontmatter support. Create specialized agent modes that switch to the right model, set thinking level, and inject the right skill, then auto-restore when done.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
