@@ -1,6 +1,6 @@
 # Prompt Template Model Extension
 
-Adds `model` and `skill` frontmatter support to prompt templates. Create specialized agent modes that switch to the right model and inject the right skill, then auto-restore when done.
+Adds `model`, `skill`, and `thinking` frontmatter support to prompt templates. Create specialized agent modes that switch to the right model, set thinking level, and inject the right skill, then auto-restore when done.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -84,8 +84,9 @@ Here `skill: surf` loads `~/.pi/agent/skills/surf/SKILL.md` and injects its cont
 |-------|----------|---------|-------------|
 | `model` | Yes | - | Model ID or `provider/model-id` |
 | `skill` | No | - | Skill name to inject into system prompt |
+| `thinking` | No | - | Thinking level: `off`, `minimal`, `low`, `medium`, `high`, `xhigh` |
 | `description` | No | - | Shown in autocomplete |
-| `restore` | No | `true` | Restore previous model after response |
+| `restore` | No | `true` | Restore previous model and thinking level after response |
 
 ## Model Format
 
@@ -133,7 +134,7 @@ Organize prompts in subdirectories for namespacing:
     └── hook.md                 → /hook (user:frontend)
 ```
 
-The subdirectory shows in autocomplete as the source label. Same name in different subdirectories creates separate commands.
+The subdirectory shows in autocomplete as the source label. Note: command names are based on filename only, so avoid duplicate filenames across subdirectories (e.g., `quick.md` and `frontend/quick.md` would collide).
 
 ## Examples
 
@@ -170,6 +171,17 @@ skill: surf
 Test this user flow: $@
 ```
 
+**Deep thinking** - max thinking for complex analysis:
+
+```markdown
+---
+description: Deep code analysis with extended thinking
+model: claude-sonnet-4-20250514
+thinking: high
+---
+Analyze this code thoroughly, considering edge cases and potential issues: $@
+```
+
 **Mode switching** - stay on the new model:
 
 ```markdown
@@ -183,13 +195,24 @@ Switched to Haiku. How can I help?
 
 ## Autocomplete Display
 
-Commands show model and skill in the description:
+Commands show model, thinking level, and skill in the description:
 
 ```
 /debug-python    Debug Python session [sonnet +tmux] (user)
+/deep-analysis   Deep code analysis [sonnet high] (user)
 /component       Create React component [sonnet] (user:frontend)
 /quick           Quick answer [haiku] (user)
 ```
+
+## Print Mode (`pi -p`)
+
+These commands work in print mode too:
+
+```bash
+pi -p "/debug-python my code crashes on line 42"
+```
+
+The model switches, skill injects, agent responds, and output prints to stdout. Useful for scripting or piping to other tools.
 
 ## Limitations
 

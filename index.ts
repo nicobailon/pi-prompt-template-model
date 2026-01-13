@@ -1,9 +1,9 @@
 /**
  * Prompt Model Extension
  *
- * Adds support for `model` and `skill` frontmatter in prompt template .md files.
- * Create specialized agent modes that switch to the right model and inject the
- * right skill, then auto-restore when done.
+ * Adds support for `model`, `skill`, and `thinking` frontmatter in prompt template .md files.
+ * Create specialized agent modes that switch to the right model, set thinking level,
+ * and inject the right skill, then auto-restore when done.
  *
  * ┌─────────────────────────────────────────────────────────────────────────────┐
  * │                                                                             │
@@ -51,7 +51,8 @@
  * - `description`: Description shown in autocomplete (standard)
  * - `model`: Model ID (e.g., "claude-sonnet-4-20250514") or full "provider/model-id"
  * - `skill`: Skill name to inject into system prompt (e.g., "tmux")
- * - `restore`: Whether to restore the previous model after response (default: true)
+ * - `thinking`: Thinking level (off, minimal, low, medium, high, xhigh)
+ * - `restore`: Whether to restore the previous model/thinking after response (default: true)
  *
  * Usage:
  * - `/debug-python my code is broken` - switches model, injects skill, runs prompt
@@ -67,8 +68,11 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import type { Model } from "@mariozechner/pi-ai";
 import type { ExtensionAPI, ExtensionContext, MessageRenderOptions } from "@mariozechner/pi-coding-agent";
+import type { ThinkingLevel } from "@mariozechner/pi-agent-core";
 import { Box, Text, Spacer, Container } from "@mariozechner/pi-tui";
-import { Theme } from "@mariozechner/pi-coding-agent";
+import type { Theme } from "@mariozechner/pi-coding-agent";
+
+const VALID_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
 
 interface PromptWithModel {
 	name: string;
@@ -77,6 +81,7 @@ interface PromptWithModel {
 	model: string;
 	restore: boolean;
 	skill?: string;
+	thinking?: ThinkingLevel;
 	source: "user" | "project";
 	subdir?: string;
 }
@@ -254,6 +259,12 @@ function loadPromptsWithModelFromDir(
 				// Parse restore field (default: true)
 				const restore = frontmatter.restore?.toLowerCase() !== "false";
 
+				// Parse thinking level if valid
+				const thinkingRaw = frontmatter.thinking?.toLowerCase();
+				const validThinking = thinkingRaw && (VALID_THINKING_LEVELS as readonly string[]).includes(thinkingRaw)
+					? thinkingRaw as ThinkingLevel
+					: undefined;
+
 				prompts.push({
 					name,
 					description: frontmatter.description || "",
@@ -261,6 +272,7 @@ function loadPromptsWithModelFromDir(
 					model: frontmatter.model,
 					restore,
 					skill: frontmatter.skill || undefined,
+					thinking: validThinking,
 					source,
 					subdir: subdir || undefined,
 				});
@@ -359,6 +371,7 @@ function renderSkillLoaded(
 export default function promptModelExtension(pi: ExtensionAPI) {
 	let prompts = new Map<string, PromptWithModel>();
 	let previousModel: Model<any> | undefined;
+	let previousThinking: ThinkingLevel | undefined;
 	let pendingSkill: { name: string; cwd: string } | undefined;
 	
 	// Register custom message renderer for skill-loaded messages
@@ -449,7 +462,7 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 		}
 
 		const skillContent = readSkillContent(skillPath);
-		if (!skillContent) {
+		if (skillContent === undefined) {
 			ctx.ui.notify(`Failed to read skill "${skillName}"`, "error");
 			return;
 		}
@@ -472,13 +485,24 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 		};
 	});
 
-	// Restore model after the agent finishes responding
+	// Restore model and thinking level after the agent finishes responding
 	pi.on("agent_end", async (_event, ctx) => {
+		const restoredParts: string[] = [];
+
 		if (previousModel) {
-			const modelName = previousModel.id;
+			restoredParts.push(previousModel.id);
 			await pi.setModel(previousModel);
 			previousModel = undefined;
-			ctx.ui.notify(`Restored to ${modelName}`, "info");
+		}
+
+		if (previousThinking !== undefined) {
+			restoredParts.push(`thinking:${previousThinking}`);
+			pi.setThinkingLevel(previousThinking);
+			previousThinking = undefined;
+		}
+
+		if (restoredParts.length > 0) {
+			ctx.ui.notify(`Restored to ${restoredParts.join(", ")}`, "info");
 		}
 	});
 
@@ -501,10 +525,13 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 		// Build skill label if present
 		const skillLabel = prompt.skill ? ` +${prompt.skill}` : "";
 
+		// Build thinking label if present
+		const thinkingLabel = prompt.thinking ? ` ${prompt.thinking}` : "";
+
 		pi.registerCommand(name, {
 			description: prompt.description
-				? `${prompt.description} [${modelLabel}${skillLabel}] ${sourceLabel}`
-				: `[${modelLabel}${skillLabel}] ${sourceLabel}`,
+				? `${prompt.description} [${modelLabel}${thinkingLabel}${skillLabel}] ${sourceLabel}`
+				: `[${modelLabel}${thinkingLabel}${skillLabel}] ${sourceLabel}`,
 
 			handler: async (args, ctx) => {
 				// Re-fetch the prompt in case it was updated
@@ -536,6 +563,17 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 					}
 				}
 
+				// Set thinking level if specified
+				if (currentPrompt.thinking) {
+					const currentThinking = pi.getThinkingLevel();
+					if (currentThinking !== currentPrompt.thinking) {
+						if (currentPrompt.restore) {
+							previousThinking = currentThinking;
+						}
+						pi.setThinkingLevel(currentPrompt.thinking);
+					}
+				}
+
 				// Set pending skill for before_agent_start handler
 				if (currentPrompt.skill) {
 					pendingSkill = { name: currentPrompt.skill, cwd: ctx.cwd };
@@ -547,6 +585,13 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 
 				// Send the expanded prompt as a user message
 				pi.sendUserMessage(expandedContent);
+
+				// Wait for agent to start processing, then wait for it to finish
+				// (required for print mode, harmless in interactive)
+				while (ctx.isIdle()) {
+					await new Promise(resolve => setTimeout(resolve, 10));
+				}
+				await ctx.waitForIdle();
 			},
 		});
 	}

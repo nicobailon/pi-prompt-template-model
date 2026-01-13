@@ -2,6 +2,18 @@
 
 ## 2025-01-12
 
+**Print Mode Support**
+
+- Commands now work with `pi -p "/command args"` for scripting
+- Handler waits for agent to complete before returning
+
+**Thinking Level Control**
+
+- Added `thinking` frontmatter field to set thinking level per prompt
+- Valid levels: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`
+- Previous thinking level restored after response (when `restore: true`)
+- Thinking level shown in autocomplete: `[sonnet high]`
+
 **Skill Injection**
 
 - Added `skill` frontmatter field to inject skill content into system prompt
