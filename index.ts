@@ -21,6 +21,7 @@
  * Frontmatter fields:
  * - `description`: Description shown in autocomplete (standard)
  * - `model`: Model ID (e.g., "claude-sonnet-4-20250514") or full "provider/model-id"
+ * - `restore`: Whether to restore the previous model after response (default: true)
  *
  * Usage:
  * - `/quick what is the capital of France` - switches to specified model, runs prompt
@@ -29,7 +30,7 @@
  * - Templates without `model` frontmatter work normally (no model switching)
  * - This extension intercepts prompts with model frontmatter as commands
  * - The template content is sent as a user message after model switch
- * - The previous model is automatically restored after the response completes
+ * - The previous model is automatically restored after the response (unless `restore: false`)
  */
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
@@ -43,6 +44,7 @@ interface PromptWithModel {
 	description: string;
 	content: string;
 	model: string; // model ID or "provider/model-id"
+	restore: boolean; // whether to restore previous model after response
 	source: "user" | "project";
 }
 
@@ -175,11 +177,15 @@ function loadPromptsWithModelFromDir(dir: string, source: "user" | "project"): P
 
 				const name = entry.name.slice(0, -3); // Remove .md
 
+				// Parse restore field (default: true)
+				const restore = frontmatter.restore?.toLowerCase() !== "false";
+
 				prompts.push({
 					name,
 					description: frontmatter.description || "",
 					content: body,
 					model: frontmatter.model,
+					restore,
 					source,
 				});
 			} catch {
@@ -326,12 +332,14 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 				const model = resolveModel(currentPrompt.model, ctx);
 				if (!model) return;
 
-				// Check if we're already on the target model (skip switch/restore)
+				// Check if we're already on the target model (skip switch)
 				const alreadyOnTargetModel = ctx.model?.provider === model.provider && ctx.model?.id === model.id;
 
 				if (!alreadyOnTargetModel) {
-					// Store previous model to restore after response
-					previousModel = ctx.model;
+					// Store previous model to restore after response (only if restore is enabled)
+					if (currentPrompt.restore) {
+						previousModel = ctx.model;
+					}
 
 					// Switch to the specified model
 					const success = await pi.setModel(model);

@@ -89,21 +89,76 @@ That's it. The extension picks up any prompt template with a `model` field and h
 
 ## Model Format
 
-The `model` field accepts:
+The `model` field accepts two formats:
 
-| Format | Example | Notes |
-|--------|---------|-------|
-| Model ID only | `claude-haiku-4-5` | Auto-detects provider |
-| Full path | `anthropic/claude-haiku-4-5` | Explicit provider |
+```yaml
+model: claude-opus-4-5               # Model ID only - auto-selects provider
+model: github-copilot/claude-opus-4-5   # Explicit provider/model
+```
 
-When multiple providers have the same model ID, prefers providers with auth configured, then by priority: `anthropic` > `github-copilot` > `openrouter`.
+### Explicit Provider Selection
+
+Use the `provider/model-id` format when you want a specific provider:
+
+```yaml
+# Claude models - pick your provider
+model: anthropic/claude-opus-4-5        # Direct Anthropic API
+model: github-copilot/claude-opus-4-5   # Via Copilot/Codex subscription
+model: openrouter/claude-opus-4-5       # Via OpenRouter
+
+# OpenAI models - two different auth methods
+model: openai/gpt-5.2                   # Direct OpenAI API key
+model: openai-codex/gpt-5.2             # Via Codex subscription (OAuth)
+
+# Other providers
+model: google/gemini-3.0-pro            # Google AI Studio
+model: xai/grok-3                       # xAI
+model: mistral/mistral-large            # Mistral AI
+```
+
+### OpenAI vs OpenAI-Codex
+
+These are **different providers** with different auth:
+
+| Provider | Auth Type | Login Command |
+|----------|-----------|---------------|
+| `openai` | API Key | `pi login openai` → paste API key |
+| `openai-codex` | OAuth | `pi login openai-codex` → web login through ChatGPT |
+
+If you have a Codex subscription, use `openai-codex/gpt-5.2`. If you're paying per-token with an API key, use `openai/gpt-5.2`.
+
+### Auto-Selection Priority
+
+When you specify just the model ID (e.g., `model: claude-opus-4-5`), the extension picks a provider automatically:
+
+1. Filters to providers where you have auth configured
+2. If multiple matches, uses priority order: `anthropic` → `github-copilot` → `openrouter`
+3. If only one match, uses that
 
 ## Frontmatter Fields
 
-| Field | Required | Description |
-|-------|----------|-------------|
-| `description` | No | Shown in autocomplete |
-| `model` | Yes | Model ID or `provider/model-id` |
+| Field | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `model` | Yes | - | Model ID or `provider/model-id` |
+| `description` | No | - | Shown in autocomplete |
+| `restore` | No | `true` | Restore previous model after response |
+
+### The `restore` Option
+
+By default, the extension restores your previous model after the response. Set `restore: false` to stay on the new model:
+
+```markdown
+---
+description: Switch to Haiku for the rest of this session
+model: claude-haiku-4-5
+restore: false
+---
+Switched to Haiku. How can I help?
+```
+
+Use cases for `restore: false`:
+- Switching to a cheaper model for a long exploratory session
+- Changing context to a specialized model (e.g., coding → writing)
 
 ## Limitations
 
