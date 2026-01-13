@@ -1,6 +1,6 @@
 # Prompt Template Model Extension
 
-Adds `model` frontmatter support to prompt templates. Temporarily switch to a different model for a specific prompt, then auto-restore your previous model.
+Adds `model` and `skill` frontmatter support to prompt templates. Create specialized agent modes that switch to the right model and inject the right skill, then auto-restore when done.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -8,16 +8,16 @@ Adds `model` frontmatter support to prompt templates. Temporarily switch to a di
 │  You're using Opus                                                          │
 │       │                                                                     │
 │       ▼                                                                     │
-│  /save-progress-doc  ──►  Extension detects `model: claude-haiku-4-5`       │
+│  /debug-python  ──►  Extension detects model + skill                        │
 │       │                                                                     │
 │       ▼                                                                     │
-│  Switches to Haiku  ──►  Stores "Opus" as previous model                    │
+│  Switches to Sonnet  ──►  Injects tmux skill into system prompt             │
 │       │                                                                     │
 │       ▼                                                                     │
-│  Agent responds with Haiku                                                  │
+│  Agent responds with Sonnet + tmux expertise                                │
 │       │                                                                     │
 │       ▼                                                                     │
-│  agent_end fires  ──►  Restores Opus  ──►  Shows "Restored to opus" notif   │
+│  agent_end fires  ──►  Restores Opus                                        │
 │       │                                                                     │
 │       ▼                                                                     │
 │  You're back on Opus                                                        │
@@ -27,141 +27,171 @@ Adds `model` frontmatter support to prompt templates. Temporarily switch to a di
 
 ## Why?
 
-Some tasks don't need your most powerful (and expensive) model. For example, you might use Opus 4.5 as your daily driver for complex coding tasks, but a progress document that summarizes your work is straightforward enough for Haiku 4.5 - it's faster and cheaper.
+Create switchable agent "modes" with a single slash command. Each mode bundles:
 
-Instead of manually switching models with `/model` before and after, just add `model: claude-haiku-4-5` to your prompt template. The extension handles the rest.
+- **The right model** for the task complexity and cost tradeoff
+- **The right skill** so the agent knows exactly how to approach it
+- **Auto-restore** to your daily driver when done
 
-**Example: `/save-progress-doc`**
-
-A prompt that generates a handoff document for the next engineer. This is mostly summarization and formatting - perfect for Haiku:
-
-```markdown
----
-description: Save a progress document for handoff
-model: claude-haiku-4-5
----
-Create a progress document that captures everything needed for another 
-engineer to continue this work. Save to ~/Documents/docs/...
-```
-
-Run `/save-progress-doc`, Haiku generates the doc, then you're automatically back on Opus for your next task.
+Instead of manually switching models and hoping the agent picks up on the right skill, you define prompt templates that configure both. `/quick-debug` spins up a cheap fast agent with REPL skills. `/deep-analysis` brings in the heavy hitter with refactoring expertise. Then you're back to your normal setup.
 
 ## Installation
-
-Clone into your pi extensions directory:
 
 ```bash
 git clone https://github.com/nicobailon/pi-prompt-template-model.git ~/.pi/agent/extensions/pi-prompt-template-model
 ```
 
-Pi auto-discovers extensions from `~/.pi/agent/extensions/*/index.ts`, so no config changes needed. Just restart pi.
+Pi auto-discovers extensions from `~/.pi/agent/extensions/*/index.ts`. Just restart pi.
 
-## Adding a Model to a Prompt Template
+## Quick Start
 
-Add a `model` field to the YAML frontmatter of any prompt template:
+Add `model` and optionally `skill` to any prompt template:
 
 ```markdown
 ---
-description: Save a progress document for handoff
-model: claude-haiku-4-5
+description: Debug Python in tmux REPL
+model: claude-sonnet-4-20250514
+skill: tmux
 ---
-Create a progress document that captures everything needed...
+Start a Python REPL session and help me debug: $@
 ```
 
-**Before (standard prompt template):**
+Run `/debug-python some issue` and the agent has:
+- Sonnet as the active model
+- Full tmux skill instructions already loaded
+- Your task ready to go
+
+## Skills as a Cheat Code
+
+Normally, skills work like this: pi lists available skills in the system prompt, the agent sees your task, decides it needs a skill, and uses the read tool to load it. That's an extra round-trip, and the agent might not always pick the right one.
+
+With the `skill` field, you're forcing it:
+
 ```markdown
 ---
-description: Quick answer
+description: Browser testing mode
+model: claude-sonnet-4-20250514
+skill: surf
 ---
-Answer concisely: $@
+$@
 ```
 
-**After (with model switching):**
-```markdown
----
-description: Quick answer
-model: claude-haiku-4-5
----
-Answer concisely: $@
-```
-
-That's it. The extension picks up any prompt template with a `model` field and handles the switching automatically.
-
-## Model Format
-
-The `model` field accepts two formats:
-
-```yaml
-model: claude-opus-4-5               # Model ID only - auto-selects provider
-model: github-copilot/claude-opus-4-5   # Explicit provider/model
-```
-
-### Explicit Provider Selection
-
-Use the `provider/model-id` format when you want a specific provider:
-
-```yaml
-# Claude models - pick your provider
-model: anthropic/claude-opus-4-5        # Direct Anthropic API
-model: github-copilot/claude-opus-4-5   # Via Copilot/Codex subscription
-model: openrouter/claude-opus-4-5       # Via OpenRouter
-
-# OpenAI models - two different auth methods
-model: openai/gpt-5.2                   # Direct OpenAI API key
-model: openai-codex/gpt-5.2             # Via Codex subscription (OAuth)
-
-# Other providers
-model: google/gemini-3.0-pro            # Google AI Studio
-model: xai/grok-3                       # xAI
-model: mistral/mistral-large            # Mistral AI
-```
-
-### OpenAI vs OpenAI-Codex
-
-These are **different providers** with different auth:
-
-| Provider | Auth Type | Login Command |
-|----------|-----------|---------------|
-| `openai` | API Key | `pi login openai` → paste API key |
-| `openai-codex` | OAuth | `pi login openai-codex` → web login through ChatGPT |
-
-If you have a Codex subscription, use `openai-codex/gpt-5.2`. If you're paying per-token with an API key, use `openai/gpt-5.2`.
-
-### Auto-Selection Priority
-
-When you specify just the model ID (e.g., `model: claude-opus-4-5`), the extension picks a provider automatically:
-
-1. Filters to providers where you have auth configured
-2. If multiple matches, uses priority order: `anthropic` → `github-copilot` → `openrouter`
-3. If only one match, uses that
+Here `skill: surf` loads `~/.pi/agent/skills/surf/SKILL.md` and injects its content directly into the system prompt before the agent even sees your task. No decision-making, no read tool, just immediate expertise. It's a forcing function for when you know exactly what workflow the agent needs.
 
 ## Frontmatter Fields
 
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
 | `model` | Yes | - | Model ID or `provider/model-id` |
+| `skill` | No | - | Skill name to inject into system prompt |
 | `description` | No | - | Shown in autocomplete |
 | `restore` | No | `true` | Restore previous model after response |
 
-### The `restore` Option
+## Model Format
 
-By default, the extension restores your previous model after the response. Set `restore: false` to stay on the new model:
+```yaml
+model: claude-sonnet-4-20250514            # Model ID only - auto-selects provider
+model: anthropic/claude-sonnet-4-20250514  # Explicit provider/model
+```
+
+When you specify just the model ID, the extension picks a provider automatically based on where you have auth configured, preferring: `anthropic` → `github-copilot` → `openrouter`.
+
+For explicit control:
+
+```yaml
+model: anthropic/claude-opus-4-5        # Direct Anthropic API
+model: github-copilot/claude-opus-4-5   # Via Copilot subscription
+model: openrouter/claude-opus-4-5       # Via OpenRouter
+model: openai/gpt-5.2                   # Direct OpenAI API
+model: openai-codex/gpt-5.2             # Via Codex subscription (OAuth)
+```
+
+## Skill Resolution
+
+The `skill` field matches the skill's directory name:
+
+```yaml
+skill: tmux
+```
+
+Resolves to (checked in order):
+1. `<cwd>/.pi/skills/tmux/SKILL.md` (project)
+2. `~/.pi/agent/skills/tmux/SKILL.md` (user)
+
+This matches pi's precedence - project skills override user skills.
+
+## Subdirectories
+
+Organize prompts in subdirectories for namespacing:
+
+```
+~/.pi/agent/prompts/
+├── quick.md                    → /quick (user)
+├── debug-python.md             → /debug-python (user)
+└── frontend/
+    ├── component.md            → /component (user:frontend)
+    └── hook.md                 → /hook (user:frontend)
+```
+
+The subdirectory shows in autocomplete as the source label. Same name in different subdirectories creates separate commands.
+
+## Examples
+
+**Cost optimization** - use Haiku for simple summarization:
 
 ```markdown
 ---
-description: Switch to Haiku for the rest of this session
+description: Save progress doc for handoff
+model: claude-haiku-4-5
+---
+Create a progress document that captures everything needed for another 
+engineer to continue this work. Save to ~/Documents/docs/...
+```
+
+**Skill injection** - guarantee the agent has REPL expertise:
+
+```markdown
+---
+description: Python debugging session
+model: claude-sonnet-4-20250514
+skill: tmux
+---
+Start a Python REPL and help me debug: $@
+```
+
+**Browser automation** - pair surf skill with a capable model:
+
+```markdown
+---
+description: Test user flow in browser
+model: claude-sonnet-4-20250514
+skill: surf
+---
+Test this user flow: $@
+```
+
+**Mode switching** - stay on the new model:
+
+```markdown
+---
+description: Switch to Haiku for this session
 model: claude-haiku-4-5
 restore: false
 ---
 Switched to Haiku. How can I help?
 ```
 
-Use cases for `restore: false`:
-- Switching to a cheaper model for a long exploratory session
-- Changing context to a specialized model (e.g., coding → writing)
+## Autocomplete Display
+
+Commands show model and skill in the description:
+
+```
+/debug-python    Debug Python session [sonnet +tmux] (user)
+/component       Create React component [sonnet] (user:frontend)
+/quick           Quick answer [haiku] (user)
+```
 
 ## Limitations
 
-- Templates discovered at startup only. Restart pi after adding/modifying.
-- Only scans top-level prompts directory (no subdirectories).
+- Templates discovered at startup. Restart pi after adding/modifying.
 - Model restore state is in-memory. Closing pi mid-response loses restore state.

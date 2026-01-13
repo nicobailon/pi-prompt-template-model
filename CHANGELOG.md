@@ -2,12 +2,25 @@
 
 ## 2025-01-12
 
+**Skill Injection**
+
+- Added `skill` frontmatter field to inject skill content into system prompt
+- Skills resolved from project (`.pi/skills/`) first, then user (`~/.pi/agent/skills/`)
+- Skill content wrapped in `<skill name="...">` tags for clear context
+- Fancy TUI display: expandable box shows skill name, path, and truncated content preview
+
+**Subdirectory Support**
+
+- Prompts directory now scanned recursively
+- Subdirectories create namespaced commands shown as `(user:subdir)` or `(project:subdir)`
+- Example: `~/.pi/agent/prompts/frontend/component.md` → `/component (user:frontend)`
+
 **Documentation**
 
 - Expanded Model Format section with explicit provider selection examples
 - Added OpenAI vs OpenAI-Codex distinction (API key vs OAuth)
 - Documented auto-selection priority for models on multiple providers
-- Updated examples to use latest frontier models (claude-opus-4-5, gpt-5.2, gemini-3.0-pro, grok-3)
+- Updated examples to use latest frontier models
 
 **Initial Release**
 

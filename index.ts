@@ -1,51 +1,84 @@
 /**
  * Prompt Model Extension
  *
- * Adds support for `model` frontmatter in prompt template .md files.
- * When a template specifies a model, it automatically switches to that model
- * before executing the prompt, then restores the previous model after the response.
+ * Adds support for `model` and `skill` frontmatter in prompt template .md files.
+ * Create specialized agent modes that switch to the right model and inject the
+ * right skill, then auto-restore when done.
  *
- * Prompt template location:
- * - ~/.pi/agent/prompts/*.md (global)
- * - <cwd>/.pi/prompts/*.md (project-local)
+ * ┌─────────────────────────────────────────────────────────────────────────────┐
+ * │                                                                             │
+ * │  You're using Opus                                                          │
+ * │       │                                                                     │
+ * │       ▼                                                                     │
+ * │  /debug-python  ──►  Extension detects model + skill frontmatter            │
+ * │       │                                                                     │
+ * │       ▼                                                                     │
+ * │  Switches to Sonnet  ──►  Stores "Opus" as previous model                   │
+ * │       │                                                                     │
+ * │       ▼                                                                     │
+ * │  before_agent_start  ──►  Injects tmux skill into system prompt             │
+ * │       │                                                                     │
+ * │       ▼                                                                     │
+ * │  Agent responds with Sonnet + tmux expertise                                │
+ * │       │                                                                     │
+ * │       ▼                                                                     │
+ * │  agent_end fires  ──►  Restores Opus  ──►  Shows "Restored to opus" notif   │
+ * │       │                                                                     │
+ * │       ▼                                                                     │
+ * │  You're back on Opus                                                        │
+ * │                                                                             │
+ * └─────────────────────────────────────────────────────────────────────────────┘
  *
- * Example prompt file (e.g., ~/.pi/agent/prompts/quick.md):
+ * Prompt template locations:
+ * - ~/.pi/agent/prompts/**\/*.md (global, recursive)
+ * - <cwd>/.pi/prompts/**\/*.md (project-local, recursive)
+ *
+ * Skill locations (checked in order):
+ * - <cwd>/.pi/skills/{name}/SKILL.md (project)
+ * - ~/.pi/agent/skills/{name}/SKILL.md (user)
+ *
+ * Example prompt file (e.g., ~/.pi/agent/prompts/debug-python.md):
  * ```markdown
  * ---
- * description: Quick answer without deep thinking
+ * description: Debug Python in tmux REPL
  * model: claude-sonnet-4-20250514
+ * skill: tmux
  * ---
- * Answer this question concisely: $@
+ * Start a Python REPL session and help me debug: $@
  * ```
  *
  * Frontmatter fields:
  * - `description`: Description shown in autocomplete (standard)
  * - `model`: Model ID (e.g., "claude-sonnet-4-20250514") or full "provider/model-id"
+ * - `skill`: Skill name to inject into system prompt (e.g., "tmux")
  * - `restore`: Whether to restore the previous model after response (default: true)
  *
  * Usage:
- * - `/quick what is the capital of France` - switches to specified model, runs prompt
+ * - `/debug-python my code is broken` - switches model, injects skill, runs prompt
  *
  * Notes:
- * - Templates without `model` frontmatter work normally (no model switching)
- * - This extension intercepts prompts with model frontmatter as commands
- * - The template content is sent as a user message after model switch
- * - The previous model is automatically restored after the response (unless `restore: false`)
+ * - Templates without `model` frontmatter work normally (handled by pi core)
+ * - Skills are injected via the before_agent_start hook into the system prompt
+ * - Subdirectories create namespaced commands shown as (user:subdir) or (project:subdir)
  */
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import type { Model } from "@mariozechner/pi-ai";
-import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, MessageRenderOptions } from "@mariozechner/pi-coding-agent";
+import { Box, Text, Spacer, Container } from "@mariozechner/pi-tui";
+import { Theme } from "@mariozechner/pi-coding-agent";
 
 interface PromptWithModel {
 	name: string;
 	description: string;
 	content: string;
-	model: string; // model ID or "provider/model-id"
-	restore: boolean; // whether to restore previous model after response
+	model: string;
+	restore: boolean;
+	skill?: string;
 	source: "user" | "project";
+	subdir?: string;
 }
 
 /**
@@ -71,7 +104,6 @@ function parseFrontmatter(content: string): { frontmatter: Record<string, string
 		const match = line.match(/^([\w-]+):\s*(.*)$/);
 		if (match) {
 			let value = match[2].trim();
-			// Remove quotes if present
 			if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
 				value = value.slice(1, -1);
 			}
@@ -140,9 +172,42 @@ function substituteArgs(content: string, args: string[]): string {
 }
 
 /**
- * Load prompt templates that have model frontmatter from a directory.
+ * Resolve skill path from name. Checks project first, then user.
  */
-function loadPromptsWithModelFromDir(dir: string, source: "user" | "project"): PromptWithModel[] {
+function resolveSkillPath(skillName: string, cwd: string): string | undefined {
+	// Project skills first
+	const projectPath = resolve(cwd, ".pi", "skills", skillName, "SKILL.md");
+	if (existsSync(projectPath)) return projectPath;
+
+	// Fall back to user skills
+	const userPath = join(homedir(), ".pi", "agent", "skills", skillName, "SKILL.md");
+	if (existsSync(userPath)) return userPath;
+
+	return undefined;
+}
+
+/**
+ * Read skill content, stripping frontmatter.
+ */
+function readSkillContent(skillPath: string): string | undefined {
+	try {
+		const raw = readFileSync(skillPath, "utf-8");
+		const { content } = parseFrontmatter(raw);
+		return content;
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * Load prompt templates that have model frontmatter from a directory.
+ * Recursively scans subdirectories.
+ */
+function loadPromptsWithModelFromDir(
+	dir: string,
+	source: "user" | "project",
+	subdir = ""
+): PromptWithModel[] {
 	const prompts: PromptWithModel[] = [];
 
 	if (!existsSync(dir)) {
@@ -157,13 +222,22 @@ function loadPromptsWithModelFromDir(dir: string, source: "user" | "project"): P
 
 			// Handle symlinks
 			let isFile = entry.isFile();
+			let isDirectory = entry.isDirectory();
 			if (entry.isSymbolicLink()) {
 				try {
 					const stats = statSync(fullPath);
 					isFile = stats.isFile();
+					isDirectory = stats.isDirectory();
 				} catch {
 					continue;
 				}
+			}
+
+			// Recurse into subdirectories
+			if (isDirectory) {
+				const newSubdir = subdir ? `${subdir}:${entry.name}` : entry.name;
+				prompts.push(...loadPromptsWithModelFromDir(fullPath, source, newSubdir));
+				continue;
 			}
 
 			if (!isFile || !entry.name.endsWith(".md")) continue;
@@ -186,7 +260,9 @@ function loadPromptsWithModelFromDir(dir: string, source: "user" | "project"): P
 					content: body,
 					model: frontmatter.model,
 					restore,
+					skill: frontmatter.skill || undefined,
 					source,
+					subdir: subdir || undefined,
 				});
 			} catch {
 				// Skip files that can't be read or parsed
@@ -222,9 +298,71 @@ function loadPromptsWithModel(cwd: string): Map<string, PromptWithModel> {
 	return promptMap;
 }
 
+/** Details for skill-loaded custom message */
+interface SkillLoadedDetails {
+	skillName: string;
+	skillContent: string;
+	skillPath: string;
+}
+
+/** Max lines to show when collapsed */
+const SKILL_PREVIEW_LINES = 5;
+
+/**
+ * Render the skill-loaded message with expandable content
+ */
+function renderSkillLoaded(
+	message: { details?: SkillLoadedDetails },
+	options: MessageRenderOptions,
+	theme: Theme
+) {
+	const { skillName, skillContent, skillPath } = message.details!;
+	const container = new Container();
+	
+	container.addChild(new Spacer(1));
+	
+	const box = new Box(1, 1, (t: string) => theme.bg("toolSuccessBg", t));
+	
+	// Header with skill name
+	const header = theme.fg("toolTitle", theme.bold(`⚡ Skill loaded: ${skillName}`));
+	box.addChild(new Text(header, 0, 0));
+	
+	// Show path in muted color
+	const pathLine = theme.fg("toolOutput", `   ${skillPath}`);
+	box.addChild(new Text(pathLine, 0, 0));
+	box.addChild(new Spacer(1));
+	
+	// Content preview or full content
+	const lines = skillContent.split("\n");
+	
+	if (options.expanded) {
+		// Show full content
+		const content = lines.map(line => theme.fg("toolOutput", line)).join("\n");
+		box.addChild(new Text(content, 0, 0));
+	} else {
+		// Show truncated preview
+		const previewLines = lines.slice(0, SKILL_PREVIEW_LINES);
+		const remaining = lines.length - SKILL_PREVIEW_LINES;
+		
+		const preview = previewLines.map(line => theme.fg("toolOutput", line)).join("\n");
+		box.addChild(new Text(preview, 0, 0));
+		
+		if (remaining > 0) {
+			box.addChild(new Text(theme.fg("warning", `\n... (${remaining} more lines)`), 0, 0));
+		}
+	}
+	
+	container.addChild(box);
+	return container;
+}
+
 export default function promptModelExtension(pi: ExtensionAPI) {
 	let prompts = new Map<string, PromptWithModel>();
 	let previousModel: Model<any> | undefined;
+	let pendingSkill: { name: string; cwd: string } | undefined;
+	
+	// Register custom message renderer for skill-loaded messages
+	pi.registerMessageRenderer<SkillLoadedDetails>("skill-loaded", renderSkillLoaded);
 
 	/**
 	 * Find and resolve a model from "provider/model-id" or just "model-id".
@@ -295,8 +433,46 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 		prompts = loadPromptsWithModel(ctx.cwd);
 	});
 
+	// Inject skill into system prompt before agent starts
+	pi.on("before_agent_start", async (event, ctx) => {
+		if (!pendingSkill) {
+			return;
+		}
+
+		const { name: skillName, cwd } = pendingSkill;
+		pendingSkill = undefined;
+
+		const skillPath = resolveSkillPath(skillName, cwd);
+		if (!skillPath) {
+			ctx.ui.notify(`Skill "${skillName}" not found`, "error");
+			return;
+		}
+
+		const skillContent = readSkillContent(skillPath);
+		if (!skillContent) {
+			ctx.ui.notify(`Failed to read skill "${skillName}"`, "error");
+			return;
+		}
+
+		// Send a custom message to display the skill loaded notification
+		pi.sendMessage<SkillLoadedDetails>({
+			customType: "skill-loaded",
+			content: `Loaded skill: ${skillName}`,
+			display: true,
+			details: {
+				skillName,
+				skillContent,
+				skillPath,
+			},
+		});
+
+		// Append skill to system prompt wrapped in <skill> tags
+		return {
+			systemPrompt: `${event.systemPrompt}\n\n<skill name="${skillName}">\n${skillContent}\n</skill>`,
+		};
+	});
+
 	// Restore model after the agent finishes responding
-	// This happens immediately after the switched-model response completes
 	pi.on("agent_end", async (_event, ctx) => {
 		if (previousModel) {
 			const modelName = previousModel.id;
@@ -307,18 +483,28 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 	});
 
 	// Initialize: register commands for prompts with model frontmatter
-	// This runs at extension load time, so we scan for prompts immediately
 	const initialCwd = process.cwd();
 	const initialPrompts = loadPromptsWithModel(initialCwd);
 
 	for (const [name, prompt] of initialPrompts) {
-		const sourceLabel = prompt.source === "user" ? "(user)" : "(project)";
+		// Build source label with subdir namespace
+		let sourceLabel: string;
+		if (prompt.subdir) {
+			sourceLabel = `(${prompt.source}:${prompt.subdir})`;
+		} else {
+			sourceLabel = `(${prompt.source})`;
+		}
+
+		// Build model label (short form)
 		const modelLabel = prompt.model.split("/").pop() || prompt.model;
+
+		// Build skill label if present
+		const skillLabel = prompt.skill ? ` +${prompt.skill}` : "";
 
 		pi.registerCommand(name, {
 			description: prompt.description
-				? `${prompt.description} [${modelLabel}] ${sourceLabel}`
-				: `[${modelLabel}] ${sourceLabel}`,
+				? `${prompt.description} [${modelLabel}${skillLabel}] ${sourceLabel}`
+				: `[${modelLabel}${skillLabel}] ${sourceLabel}`,
 
 			handler: async (args, ctx) => {
 				// Re-fetch the prompt in case it was updated
@@ -348,6 +534,11 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 						previousModel = undefined;
 						return;
 					}
+				}
+
+				// Set pending skill for before_agent_start handler
+				if (currentPrompt.skill) {
+					pendingSkill = { name: currentPrompt.skill, cwd: ctx.cwd };
 				}
 
 				// Expand the template with arguments
