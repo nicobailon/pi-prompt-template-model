@@ -1,0 +1,30 @@
+{
+  "name": "pi-prompt-template-model",
+  "version": "0.1.0",
+  "description": "Prompt template model selector extension for pi coding agent",
+  "author": "Nico Bailon",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nicobailon/pi-prompt-template-model.git"
+  },
+  "keywords": [
+    "pi-package",
+    "pi",
+    "coding-agent",
+    "prompt-template",
+    "model-selector",
+    "extension"
+  ],
+  "files": [
+    "index.ts",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}

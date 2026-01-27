@@ -38,10 +38,10 @@ Instead of manually switching models and hoping the agent picks up on the right 
 ## Installation
 
 ```bash
-git clone https://github.com/nicobailon/pi-prompt-template-model.git ~/.pi/agent/extensions/pi-prompt-template-model
+pi install npm:pi-prompt-template-model
 ```
 
-Pi auto-discovers extensions from `~/.pi/agent/extensions/*/index.ts`. Just restart pi.
+Restart pi to load the extension.
 
 ## Quick Start
 
