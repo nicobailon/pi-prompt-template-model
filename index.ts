@@ -549,8 +549,9 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 					return;
 				}
 
-				// Capture current model before any switching (needed for restore)
+				// Capture current state before any switching (needed for restore)
 				const savedModel = ctx.model;
+				const savedThinking = pi.getThinkingLevel();
 
 				// Resolve and switch to the first available model from the list
 				const result = await resolveAndSwitch(currentPrompt.models, ctx);
@@ -558,17 +559,15 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 
 				if (!result.alreadyActive && currentPrompt.restore) {
 					previousModel = savedModel;
+					previousThinking = savedThinking;
 				}
 
 				// Set thinking level if specified
 				if (currentPrompt.thinking) {
-					const currentThinking = pi.getThinkingLevel();
-					if (currentThinking !== currentPrompt.thinking) {
-						if (currentPrompt.restore) {
-							previousThinking = currentThinking;
-						}
-						pi.setThinkingLevel(currentPrompt.thinking);
+					if (currentPrompt.restore && previousThinking === undefined && currentPrompt.thinking !== savedThinking) {
+						previousThinking = savedThinking;
 					}
+					pi.setThinkingLevel(currentPrompt.thinking);
 				}
 
 				// Set pending skill for before_agent_start handler
