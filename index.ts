@@ -49,7 +49,8 @@
  *
  * Frontmatter fields:
  * - `description`: Description shown in autocomplete (standard)
- * - `model`: Model ID (e.g., "claude-sonnet-4-20250514") or full "provider/model-id"
+ * - `model`: Model ID, "provider/model-id", or comma-separated list for fallback
+ *            e.g., "claude-haiku-4-5" or "claude-haiku-4-5, claude-sonnet-4-20250514"
  * - `skill`: Skill name to inject into system prompt (e.g., "tmux")
  * - `thinking`: Thinking level (off, minimal, low, medium, high, xhigh)
  * - `restore`: Whether to restore the previous model/thinking after response (default: true)
@@ -67,10 +68,9 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import type { Model } from "@mariozechner/pi-ai";
-import type { ExtensionAPI, ExtensionContext, MessageRenderOptions } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, MessageRenderOptions, Theme } from "@mariozechner/pi-coding-agent";
 import type { ThinkingLevel } from "@mariozechner/pi-agent-core";
 import { Box, Text, Spacer, Container } from "@mariozechner/pi-tui";
-import type { Theme } from "@mariozechner/pi-coding-agent";
 
 const VALID_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
 
@@ -78,7 +78,7 @@ interface PromptWithModel {
 	name: string;
 	description: string;
 	content: string;
-	model: string;
+	models: string[];
 	restore: boolean;
 	skill?: string;
 	thinking?: ThinkingLevel;
@@ -254,6 +254,9 @@ function loadPromptsWithModelFromDir(
 				// Only include templates that have a model field
 				if (!frontmatter.model) continue;
 
+				const models = frontmatter.model.split(",").map(s => s.trim()).filter(Boolean);
+				if (models.length === 0) continue;
+
 				const name = entry.name.slice(0, -3); // Remove .md
 
 				// Parse restore field (default: true)
@@ -269,7 +272,7 @@ function loadPromptsWithModelFromDir(
 					name,
 					description: frontmatter.description || "",
 					content: body,
-					model: frontmatter.model,
+					models,
 					restore,
 					skill: frontmatter.skill || undefined,
 					thinking: validThinking,
@@ -381,63 +384,66 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 	 * Find and resolve a model from "provider/model-id" or just "model-id".
 	 * If no provider is specified, searches all models by ID.
 	 * Prefers models with auth, then by provider priority: anthropic > github-copilot > openrouter.
+	 * Returns undefined if the model can't be resolved (caller handles notifications).
 	 */
 	function resolveModel(modelSpec: string, ctx: ExtensionContext): Model<any> | undefined {
 		const slashIndex = modelSpec.indexOf("/");
 
 		if (slashIndex !== -1) {
-			// Has provider: use exact match
 			const provider = modelSpec.slice(0, slashIndex);
 			const modelId = modelSpec.slice(slashIndex + 1);
 
-			if (!provider || !modelId) {
-				ctx.ui.notify(`Invalid model format "${modelSpec}". Expected "provider/model-id"`, "error");
-				return undefined;
-			}
+			if (!provider || !modelId) return undefined;
 
-			const model = ctx.modelRegistry.find(provider, modelId);
-			if (!model) {
-				ctx.ui.notify(`Model "${modelSpec}" not found`, "error");
-				return undefined;
-			}
-			return model;
+			return ctx.modelRegistry.find(provider, modelId);
 		}
 
-		// No provider: search all models by ID
 		const allMatches = ctx.modelRegistry.getAll().filter((m) => m.id === modelSpec);
 
-		if (allMatches.length === 0) {
-			ctx.ui.notify(`Model "${modelSpec}" not found`, "error");
-			return undefined;
-		}
+		if (allMatches.length === 0) return undefined;
+		if (allMatches.length === 1) return allMatches[0];
 
-		if (allMatches.length === 1) {
-			return allMatches[0];
-		}
-
-		// Multiple matches - prefer models with auth configured
 		const availableMatches = ctx.modelRegistry.getAvailable().filter((m) => m.id === modelSpec);
 
-		if (availableMatches.length === 1) {
-			return availableMatches[0];
-		}
+		if (availableMatches.length === 1) return availableMatches[0];
 
 		if (availableMatches.length > 1) {
-			// Multiple with auth - prefer by provider priority
 			const preferredProviders = ["anthropic", "github-copilot", "openrouter"];
 			for (const provider of preferredProviders) {
 				const preferred = availableMatches.find((m) => m.provider === provider);
-				if (preferred) {
-					return preferred;
-				}
+				if (preferred) return preferred;
 			}
-			// No preferred provider found, use first available
 			return availableMatches[0];
 		}
 
-		// No matches with auth - show all options
-		const options = allMatches.map((m) => `${m.provider}/${m.id}`).join(", ");
-		ctx.ui.notify(`Ambiguous model "${modelSpec}". Options: ${options}`, "error");
+		return undefined;
+	}
+
+	/**
+	 * Try each model spec in order. Return the first one that resolves and has auth.
+	 * If the current model matches a candidate, use it without switching.
+	 * Calls pi.setModel() for the first viable candidate, so the caller must
+	 * capture ctx.model beforehand if restore is needed.
+	 */
+	async function resolveAndSwitch(
+		modelSpecs: string[],
+		ctx: ExtensionContext,
+	): Promise<{ model: Model<any>; alreadyActive: boolean } | undefined> {
+		for (const spec of modelSpecs) {
+			const model = resolveModel(spec, ctx);
+			if (!model) continue;
+
+			if (ctx.model?.provider === model.provider && ctx.model?.id === model.id) {
+				return { model, alreadyActive: true };
+			}
+
+			const success = await pi.setModel(model);
+			if (success) {
+				return { model, alreadyActive: false };
+			}
+		}
+
+		ctx.ui.notify(`No available model from: ${modelSpecs.join(", ")}`, "error");
 		return undefined;
 	}
 
@@ -519,8 +525,10 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 			sourceLabel = `(${prompt.source})`;
 		}
 
-		// Build model label (short form)
-		const modelLabel = prompt.model.split("/").pop() || prompt.model;
+		// Build model label (short form, pipe-separated for fallbacks)
+		const modelLabel = prompt.models
+			.map(m => m.split("/").pop() || m)
+			.join("|");
 
 		// Build skill label if present
 		const skillLabel = prompt.skill ? ` +${prompt.skill}` : "";
@@ -541,26 +549,15 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 					return;
 				}
 
-				// Resolve the model
-				const model = resolveModel(currentPrompt.model, ctx);
-				if (!model) return;
+				// Capture current model before any switching (needed for restore)
+				const savedModel = ctx.model;
 
-				// Check if we're already on the target model (skip switch)
-				const alreadyOnTargetModel = ctx.model?.provider === model.provider && ctx.model?.id === model.id;
+				// Resolve and switch to the first available model from the list
+				const result = await resolveAndSwitch(currentPrompt.models, ctx);
+				if (!result) return;
 
-				if (!alreadyOnTargetModel) {
-					// Store previous model to restore after response (only if restore is enabled)
-					if (currentPrompt.restore) {
-						previousModel = ctx.model;
-					}
-
-					// Switch to the specified model
-					const success = await pi.setModel(model);
-					if (!success) {
-						ctx.ui.notify(`No API key for model "${currentPrompt.model}"`, "error");
-						previousModel = undefined;
-						return;
-					}
+				if (!result.alreadyActive && currentPrompt.restore) {
+					previousModel = savedModel;
 				}
 
 				// Set thinking level if specified

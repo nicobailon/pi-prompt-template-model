@@ -1,3 +1,7 @@
+<p>
+  <img src="banner.png" alt="pi-prompt-template-model" width="1100">
+</p>
+
 # Prompt Template Model Extension
 
 **Pi prompt templates on steroids.** Adds `model`, `skill`, and `thinking` frontmatter support. Create specialized agent modes that switch to the right model, set thinking level, and inject the right skill, then auto-restore when done.
@@ -82,7 +86,7 @@ Here `skill: surf` loads `~/.pi/agent/skills/surf/SKILL.md` and injects its cont
 
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
-| `model` | Yes | - | Model ID or `provider/model-id` |
+| `model` | Yes | - | Model ID, `provider/model-id`, or comma-separated list for fallback |
 | `skill` | No | - | Skill name to inject into system prompt |
 | `thinking` | No | - | Thinking level: `off`, `minimal`, `low`, `medium`, `high`, `xhigh` |
 | `description` | No | - | Shown in autocomplete |
@@ -106,6 +110,26 @@ model: openrouter/claude-opus-4-5       # Via OpenRouter
 model: openai/gpt-5.2                   # Direct OpenAI API
 model: openai-codex/gpt-5.2             # Via Codex subscription (OAuth)
 ```
+
+## Model Fallback
+
+Specify multiple models as a comma-separated list. The extension tries each one in order and uses the first that resolves and has auth configured.
+
+```yaml
+model: claude-haiku-4-5, claude-sonnet-4-20250514
+```
+
+This tries Haiku first. If it can't be found or has no API key, falls back to Sonnet. Useful when you have multiple provider accounts with different availability, or want a cost-optimized primary with a guaranteed fallback.
+
+You can mix bare model IDs and explicit provider/model specs:
+
+```yaml
+model: anthropic/claude-haiku-4-5, openrouter/claude-haiku-4-5, claude-sonnet-4-20250514
+```
+
+Here the extension tries Haiku on Anthropic first, then Haiku on OpenRouter, then Sonnet on whatever provider has auth. If you're already on one of the listed models when the command runs, it uses that without switching.
+
+When all candidates fail, a single error notification lists everything that was tried.
 
 ## Skill Resolution
 
@@ -182,6 +206,27 @@ thinking: high
 Analyze this code thoroughly, considering edge cases and potential issues: $@
 ```
 
+**Model fallback** - prefer cheap, fall back to reliable:
+
+```markdown
+---
+description: Save progress doc for handoff
+model: claude-haiku-4-5, claude-sonnet-4-20250514
+---
+Create a progress document that captures everything needed for another 
+engineer to continue this work. Save to ~/Documents/docs/...
+```
+
+**Cross-provider fallback** - same model, different providers:
+
+```markdown
+---
+description: Quick analysis
+model: anthropic/claude-haiku-4-5, openrouter/claude-haiku-4-5
+---
+$@
+```
+
 **Mode switching** - stay on the new model:
 
 ```markdown
@@ -200,6 +245,7 @@ Commands show model, thinking level, and skill in the description:
 ```
 /debug-python    Debug Python session [sonnet +tmux] (user)
 /deep-analysis   Deep code analysis [sonnet high] (user)
+/save-progress   Save progress doc [haiku|sonnet] (user)
 /component       Create React component [sonnet] (user:frontend)
 /quick           Quick answer [haiku] (user)
 ```
