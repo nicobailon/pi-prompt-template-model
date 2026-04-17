@@ -1,6 +1,6 @@
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 export const PROMPT_TEMPLATE_SUBAGENT_REQUEST_EVENT = "prompt-template:subagent:request";
@@ -112,19 +112,52 @@ export interface SubagentRuntime {
 let runtimeCache: SubagentRuntime | null = null;
 const delegatedLiveState = new Map<string, DelegatedSubagentLiveState>();
 
-function runtimeCandidates(cwd: string): string[] {
-	const fromEnv = process.env.PI_SUBAGENT_RUNTIME_ROOT?.trim();
-	if (fromEnv) return [resolve(fromEnv)];
-	const localSibling = resolve(dirname(fileURLToPath(import.meta.url)), "..", "subagent");
-	return [
-		resolve(cwd, ".pi", "agent", "extensions", "subagent"),
-		join(homedir(), ".pi", "agent", "extensions", "subagent"),
-		localSibling,
-	];
+function dedupePaths(paths: string[]): string[] {
+	const seen = new Set<string>();
+	const unique: string[] = [];
+	for (const candidate of paths) {
+		if (seen.has(candidate)) continue;
+		seen.add(candidate);
+		unique.push(candidate);
+	}
+	return unique;
 }
 
-function findSubagentRoot(cwd: string): string | undefined {
-	for (const candidate of runtimeCandidates(cwd)) {
+function packageRuntimeCandidates(moduleDir: string): string[] {
+	const directParent = resolve(moduleDir, "..");
+	const directCandidates = [join(directParent, "pi-subagents"), join(directParent, "subagent")];
+	const maybeGitRoot = resolve(moduleDir, "..", "..", "..");
+	if (basename(maybeGitRoot) !== "git") {
+		return directCandidates;
+	}
+
+	const hostRoot = resolve(moduleDir, "..", "..");
+	const hostCandidates: string[] = [];
+	try {
+		for (const entry of readdirSync(hostRoot, { withFileTypes: true })) {
+			if (!entry.isDirectory()) continue;
+			hostCandidates.push(join(hostRoot, entry.name, "pi-subagents"));
+			hostCandidates.push(join(hostRoot, entry.name, "subagent"));
+		}
+	} catch {
+		// Ignore discovery errors here and fall back to direct candidates.
+	}
+
+	return dedupePaths([...directCandidates, ...hostCandidates]);
+}
+
+export function runtimeCandidatesFor(cwd: string, moduleDir = dirname(fileURLToPath(import.meta.url))): string[] {
+	const fromEnv = process.env.PI_SUBAGENT_RUNTIME_ROOT?.trim();
+	if (fromEnv) return [resolve(fromEnv)];
+	return dedupePaths([
+		resolve(cwd, ".pi", "agent", "extensions", "subagent"),
+		join(homedir(), ".pi", "agent", "extensions", "subagent"),
+		...packageRuntimeCandidates(moduleDir),
+	]);
+}
+
+export function findSubagentRoot(cwd: string, moduleDir = dirname(fileURLToPath(import.meta.url))): string | undefined {
+	for (const candidate of runtimeCandidatesFor(cwd, moduleDir)) {
 		if (existsSync(join(candidate, "agents.ts")) || existsSync(join(candidate, "agents.js"))) {
 			return candidate;
 		}
