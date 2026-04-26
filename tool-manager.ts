@@ -209,6 +209,9 @@ export function createToolManager(pi: ExtensionAPI, deps: ToolManagerDeps) {
 		getGuidance() {
 			return toolGuidance;
 		},
+		hasQueuedCommand() {
+			return toolQueuedCommand !== null;
+		},
 		clearQueue() {
 			toolQueuedCommand = null;
 		},
