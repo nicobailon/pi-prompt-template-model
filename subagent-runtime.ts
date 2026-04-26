@@ -1,4 +1,5 @@
-import { existsSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -111,23 +112,72 @@ export interface SubagentRuntime {
 
 let runtimeCache: SubagentRuntime | null = null;
 const delegatedLiveState = new Map<string, DelegatedSubagentLiveState>();
+const RUNTIME_MODULE_FILENAMES = ["agents.ts", "agents.mts", "agents.js", "agents.mjs"] as const;
+
+function hasRuntimeModule(candidate: string): boolean {
+	return RUNTIME_MODULE_FILENAMES.some((fileName) => existsSync(join(candidate, fileName)));
+}
+
+function getGlobalNpmRoot(): string | undefined {
+	try {
+		const output = execFileSync("npm", ["root", "-g"], {
+			encoding: "utf-8",
+			stdio: ["ignore", "pipe", "ignore"],
+		}).trim();
+		return output ? resolve(output) : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+function findGitPackageCandidates(root: string): string[] {
+	if (!existsSync(root)) return [];
+
+	const runtimeRoots: string[] = [];
+	const directoriesToVisit = readdirSync(root, { withFileTypes: true })
+		.filter((entry) => entry.isDirectory())
+		.map((entry) => join(root, entry.name));
+
+	while (directoriesToVisit.length > 0) {
+		const currentDir = directoriesToVisit.pop();
+		if (!currentDir) continue;
+		if (hasRuntimeModule(currentDir)) runtimeRoots.push(currentDir);
+		for (const entry of readdirSync(currentDir, { withFileTypes: true })) {
+			if (!entry.isDirectory()) continue;
+			if (entry.name === ".git" || entry.name === "node_modules") continue;
+			directoriesToVisit.push(join(currentDir, entry.name));
+		}
+	}
+
+	return runtimeRoots;
+}
 
 function runtimeCandidates(cwd: string): string[] {
-	const fromEnv = process.env.PI_SUBAGENT_RUNTIME_ROOT?.trim();
-	if (fromEnv) return [resolve(fromEnv)];
+	const configuredRoot = process.env.PI_SUBAGENT_RUNTIME_ROOT?.trim();
+	if (configuredRoot) return [resolve(configuredRoot)];
+
+	const home = homedir();
 	const localSibling = resolve(dirname(fileURLToPath(import.meta.url)), "..", "subagent");
-	return [
-		resolve(cwd, ".pi", "agent", "extensions", "subagent"),
-		join(homedir(), ".pi", "agent", "extensions", "subagent"),
+	const globalNpmRoot = getGlobalNpmRoot();
+	const candidates = [
+		resolve(cwd, ".pi", "extensions", "subagent"),
+		resolve(cwd, ".pi", "npm", "node_modules", "pi-subagents"),
+		...findGitPackageCandidates(resolve(cwd, ".pi", "git")),
+		join(home, ".pi", "agent", "extensions", "subagent"),
+		...findGitPackageCandidates(join(home, ".pi", "agent", "git")),
+		globalNpmRoot ? join(globalNpmRoot, "pi-subagents") : undefined,
 		localSibling,
 	];
+
+	const resolvedCandidates = candidates
+		.filter((candidate): candidate is string => typeof candidate === "string" && candidate.length > 0)
+		.map((candidate) => resolve(candidate));
+	return [...new Set(resolvedCandidates)];
 }
 
 function findSubagentRoot(cwd: string): string | undefined {
 	for (const candidate of runtimeCandidates(cwd)) {
-		if (existsSync(join(candidate, "agents.ts")) || existsSync(join(candidate, "agents.js"))) {
-			return candidate;
-		}
+		if (hasRuntimeModule(candidate)) return candidate;
 	}
 	return undefined;
 }
@@ -156,9 +206,8 @@ async function importRuntimeModule(root: string, baseName: string): Promise<unkn
 	throw new Error(`Missing runtime module: ${baseName}`);
 }
 
-export function updateDelegatedLiveState(requestId: string, update: Partial<DelegatedSubagentLiveState>): void {
-	const now = Date.now();
-	const existing = delegatedLiveState.get(requestId) ?? {
+function createDelegatedLiveState(now: number): DelegatedSubagentLiveState {
+	return {
 		recentOutput: [],
 		recentTools: [],
 		toolCount: 0,
@@ -168,6 +217,11 @@ export function updateDelegatedLiveState(requestId: string, update: Partial<Dele
 		startedAt: now,
 		updatedAt: now,
 	};
+}
+
+export function updateDelegatedLiveState(requestId: string, update: Partial<DelegatedSubagentLiveState>): void {
+	const now = Date.now();
+	const existing = delegatedLiveState.get(requestId) ?? createDelegatedLiveState(now);
 	const next: DelegatedSubagentLiveState = {
 		...existing,
 		...update,
@@ -185,23 +239,15 @@ export function updateDelegatedLiveState(requestId: string, update: Partial<Dele
 }
 
 export function appendDelegatedLiveOutput(requestId: string, line?: string): void {
-	if (!line || !line.trim() || line.trim() === "(running...)") return;
-	const fallbackNow = Date.now();
-	const existing = delegatedLiveState.get(requestId) ?? {
-		recentOutput: [],
-		recentTools: [],
-		toolCount: 0,
-		durationMs: 0,
-		tokens: 0,
-		taskProgress: [],
-		startedAt: fallbackNow,
-		updatedAt: fallbackNow,
-	};
-	const recentOutput = [...existing.recentOutput, line];
+	const trimmedLine = line?.trim();
+	if (!trimmedLine || trimmedLine === "(running...)") return;
+
+	const now = Date.now();
+	const existing = delegatedLiveState.get(requestId) ?? createDelegatedLiveState(now);
 	delegatedLiveState.set(requestId, {
 		...existing,
-		recentOutput,
-		updatedAt: Date.now(),
+		recentOutput: [...existing.recentOutput, line],
+		updatedAt: now,
 	});
 }
 
@@ -217,7 +263,7 @@ export async function ensureSubagentRuntime(cwd: string): Promise<SubagentRuntim
 	const root = findSubagentRoot(cwd);
 	if (!root) {
 		throw new Error(
-			"Delegated prompt execution requires the subagent extension runtime at ~/.pi/agent/extensions/subagent.",
+			"Delegated prompt execution requires the pi-subagents runtime. Install it with `pi install npm:pi-subagents` (preferred) or set PI_SUBAGENT_RUNTIME_ROOT explicitly.",
 		);
 	}
 
