@@ -13,10 +13,10 @@ Templates are markdown files that register as slash commands.
 
 ## Where Templates Live
 
-- `~/.pi/agent/prompts/` — user prompts (highest priority)
+- `~/.pi/agent/prompts/` — user prompts
 - `.pi/prompts/` inside a project — project-specific prompts
-
-Extension `examples/` are reference files only. Copy them to a prompt directory to register them.
+- paths listed in global `~/.pi/agent/settings.json.prompts`
+- paths listed in project `.pi/settings.json.prompts`
 
 ## Minimal Template
 

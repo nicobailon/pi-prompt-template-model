@@ -1349,6 +1349,8 @@ function loadPromptsWithModelFromDir(
 	includePlainPrompts: boolean,
 	subdir = "",
 	visitedDirectories = new Set<string>(),
+	visitedFiles = new Set<string>(),
+	allowedFiles?: Set<string>,
 ): { prompts: PromptWithModel[]; diagnostics: PromptLoaderDiagnostic[] } {
 	const prompts: PromptWithModel[] = [];
 	const diagnostics: PromptLoaderDiagnostic[] = [];
@@ -1414,13 +1416,31 @@ function loadPromptsWithModelFromDir(
 
 			if (isDirectory) {
 				const nextSubdir = subdir ? `${subdir}:${entry.name}` : entry.name;
-				const nested = loadPromptsWithModelFromDir(fullPath, source, includePlainPrompts, nextSubdir, visitedDirectories);
+				const nested = loadPromptsWithModelFromDir(fullPath, source, includePlainPrompts, nextSubdir, visitedDirectories, visitedFiles, allowedFiles);
 				prompts.push(...nested.prompts);
 				diagnostics.push(...nested.diagnostics);
 				continue;
 			}
 
 			if (!isFile || !entry.name.endsWith(".md")) continue;
+
+			let canonicalFile: string;
+			try {
+				canonicalFile = realpathSync(fullPath);
+			} catch (error) {
+				diagnostics.push(
+					createDiagnostic(
+						"unreadable-prompt-file",
+						fullPath,
+						source,
+						`Skipping unreadable prompt file at ${fullPath}: ${error instanceof Error ? error.message : String(error)}.`,
+					),
+				);
+				continue;
+			}
+			if (allowedFiles && !allowedFiles.has(canonicalFile)) continue;
+			if (visitedFiles.has(canonicalFile)) continue;
+			visitedFiles.add(canonicalFile);
 
 			try {
 				const rawContent = readFileSync(fullPath, "utf-8");
@@ -1802,11 +1822,121 @@ function loadPromptsWithModelFromDir(
 	return { prompts, diagnostics };
 }
 
+function expandSettingsPromptPath(raw: string, baseDir: string): string {
+	const expanded = raw === "~" ? homedir() : raw.startsWith("~/") ? join(homedir(), raw.slice(2)) : raw;
+	return isAbsolute(expanded) ? expanded : resolve(baseDir, expanded);
+}
+
+function settingsPromptPaths(settingsPath: string, baseDir: string, source: PromptSource, diagnostics: PromptLoaderDiagnostic[]): string[] {
+	if (!existsSync(settingsPath)) return [];
+
+	let settings: unknown;
+	try {
+		settings = JSON.parse(readFileSync(settingsPath, "utf-8"));
+	} catch (error) {
+		diagnostics.push(
+			createDiagnostic(
+				"invalid-settings",
+				settingsPath,
+				source,
+				`Ignoring prompt paths in ${settingsPath}: ${error instanceof Error ? error.message : String(error)}.`,
+			),
+		);
+		return [];
+	}
+
+	if (!settings || typeof settings !== "object" || Array.isArray(settings)) return [];
+	const prompts = (settings as Record<string, unknown>).prompts;
+	if (prompts === undefined) return [];
+	if (!Array.isArray(prompts)) {
+		diagnostics.push(
+			createDiagnostic(
+				"invalid-settings-prompts",
+				settingsPath,
+				source,
+				`Ignoring prompt paths in ${settingsPath}: settings field "prompts" must be an array of strings.`,
+			),
+		);
+		return [];
+	}
+
+	const paths: string[] = [];
+	for (const promptPath of prompts) {
+		if (typeof promptPath !== "string" || !promptPath.trim()) {
+			diagnostics.push(
+				createDiagnostic(
+					"invalid-settings-prompts",
+					settingsPath,
+					source,
+					`Ignoring invalid prompt path in ${settingsPath}: prompt paths must be non-empty strings.`,
+				),
+			);
+			continue;
+		}
+		paths.push(expandSettingsPromptPath(promptPath.trim(), baseDir));
+	}
+	return paths;
+}
+
+function loadPromptsWithModelFromPath(
+	path: string,
+	source: PromptSource,
+	includePlainPrompts: boolean,
+	visitedFiles: Set<string>,
+): { prompts: PromptWithModel[]; diagnostics: PromptLoaderDiagnostic[] } {
+	if (!existsSync(path)) return { prompts: [], diagnostics: [] };
+
+	let stats;
+	try {
+		stats = statSync(path);
+	} catch (error) {
+		return {
+			prompts: [],
+			diagnostics: [
+				createDiagnostic(
+					"unreadable-prompt-path",
+					path,
+					source,
+					`Skipping prompt path ${path}: ${error instanceof Error ? error.message : String(error)}.`,
+				),
+			],
+		};
+	}
+
+	if (stats.isDirectory()) {
+		return loadPromptsWithModelFromDir(path, source, includePlainPrompts, "", new Set<string>(), visitedFiles);
+	}
+
+	if (!stats.isFile() || !path.endsWith(".md")) return { prompts: [], diagnostics: [] };
+
+	let canonicalFile: string;
+	try {
+		canonicalFile = realpathSync(path);
+	} catch (error) {
+		return {
+			prompts: [],
+			diagnostics: [
+				createDiagnostic(
+					"unreadable-prompt-file",
+					path,
+					source,
+					`Skipping unreadable prompt file at ${path}: ${error instanceof Error ? error.message : String(error)}.`,
+				),
+			],
+		};
+	}
+
+	return loadPromptsWithModelFromDir(dirname(path), source, includePlainPrompts, "", new Set<string>(), visitedFiles, new Set([canonicalFile]));
+}
+
 export function loadPromptsWithModel(cwd: string, includePlainPrompts = false): LoadPromptsWithModelResult {
-	const globalDir = join(homedir(), ".pi", "agent", "prompts");
-	const projectDir = resolve(cwd, ".pi", "prompts");
+	const globalBaseDir = join(homedir(), ".pi", "agent");
+	const projectBaseDir = resolve(cwd, ".pi");
+	const globalDir = join(globalBaseDir, "prompts");
+	const projectDir = join(projectBaseDir, "prompts");
 	const promptMap = new Map<string, PromptWithModel>();
 	const diagnostics: PromptLoaderDiagnostic[] = [];
+	const visitedFiles = new Set<string>();
 
 	function addPrompt(prompt: PromptWithModel) {
 		const existing = promptMap.get(prompt.name);
@@ -1830,16 +1960,28 @@ export function loadPromptsWithModel(cwd: string, includePlainPrompts = false): 
 		promptMap.set(prompt.name, prompt);
 	}
 
-	const globalResult = loadPromptsWithModelFromDir(globalDir, "user", includePlainPrompts);
-	diagnostics.push(...globalResult.diagnostics);
-	for (const prompt of globalResult.prompts) {
-		addPrompt(prompt);
+	const globalPaths = [
+		globalDir,
+		...settingsPromptPaths(join(globalBaseDir, "settings.json"), globalBaseDir, "user", diagnostics),
+	];
+	for (const path of globalPaths) {
+		const result = loadPromptsWithModelFromPath(path, "user", includePlainPrompts, visitedFiles);
+		diagnostics.push(...result.diagnostics);
+		for (const prompt of result.prompts) {
+			addPrompt(prompt);
+		}
 	}
 
-	const projectResult = loadPromptsWithModelFromDir(projectDir, "project", includePlainPrompts);
-	diagnostics.push(...projectResult.diagnostics);
-	for (const prompt of projectResult.prompts) {
-		addPrompt(prompt);
+	const projectPaths = [
+		projectDir,
+		...settingsPromptPaths(join(projectBaseDir, "settings.json"), projectBaseDir, "project", diagnostics),
+	];
+	for (const path of projectPaths) {
+		const result = loadPromptsWithModelFromPath(path, "project", includePlainPrompts, visitedFiles);
+		diagnostics.push(...result.diagnostics);
+		for (const prompt of result.prompts) {
+			addPrompt(prompt);
+		}
 	}
 
 	return { prompts: promptMap, diagnostics };

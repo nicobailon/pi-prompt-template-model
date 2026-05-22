@@ -45,6 +45,66 @@ test("loadPromptsWithModel lets project prompts override user prompts", () => {
 	});
 });
 
+test("loadPromptsWithModel loads prompt directories from global and project settings", () => {
+	withTempHome((root) => {
+		const cwd = join(root, "project");
+		mkdirSync(join(root, ".pi", "agent", "external-prompts"), { recursive: true });
+		mkdirSync(join(cwd, ".pi", "project-prompts"), { recursive: true });
+		writeFileSync(join(root, ".pi", "agent", "settings.json"), JSON.stringify({ prompts: ["external-prompts"] }));
+		mkdirSync(join(cwd, ".pi"), { recursive: true });
+		writeFileSync(join(cwd, ".pi", "settings.json"), JSON.stringify({ prompts: ["project-prompts"] }));
+		writeFileSync(join(root, ".pi", "agent", "external-prompts", "user-settings.md"), '---\nthinking: medium\n---\nuser');
+		writeFileSync(join(cwd, ".pi", "project-prompts", "project-settings.md"), '---\nthinking: high\n---\nproject');
+
+		const result = loadPromptsWithModel(cwd);
+		assert.equal(result.prompts.get("user-settings")?.source, "user");
+		assert.equal(result.prompts.get("user-settings")?.thinking, "medium");
+		assert.equal(result.prompts.get("project-settings")?.source, "project");
+		assert.equal(result.prompts.get("project-settings")?.thinking, "high");
+	});
+});
+
+test("loadPromptsWithModel expands tilde settings prompt paths", () => {
+	withTempHome((root) => {
+		const cwd = join(root, "project");
+		mkdirSync(join(root, "commands"), { recursive: true });
+		mkdirSync(join(root, ".pi", "agent"), { recursive: true });
+		writeFileSync(join(root, ".pi", "agent", "settings.json"), JSON.stringify({ prompts: ["~/commands"] }));
+		writeFileSync(join(root, "commands", "tilde-prompt.md"), '---\nthinking: low\n---\nbody');
+
+		const result = loadPromptsWithModel(cwd);
+		assert.equal(result.prompts.get("tilde-prompt")?.thinking, "low");
+	});
+});
+
+test("loadPromptsWithModel loads single prompt files from settings without sibling files", () => {
+	withTempHome((root) => {
+		const cwd = join(root, "project");
+		mkdirSync(join(cwd, ".pi", "commands"), { recursive: true });
+		writeFileSync(join(cwd, ".pi", "settings.json"), JSON.stringify({ prompts: ["commands/only.md"] }));
+		writeFileSync(join(cwd, ".pi", "commands", "only.md"), '---\nthinking: high\n---\nonly');
+		writeFileSync(join(cwd, ".pi", "commands", "sibling.md"), '---\nthinking: medium\n---\nsibling');
+
+		const result = loadPromptsWithModel(cwd);
+		assert.equal(result.prompts.get("only")?.content, "only");
+		assert.equal(result.prompts.has("sibling"), false);
+	});
+});
+
+test("loadPromptsWithModel dedupes overlapping settings prompt paths by canonical file", () => {
+	withTempHome((root) => {
+		const cwd = join(root, "project");
+		const promptsDir = join(cwd, ".pi", "prompts");
+		mkdirSync(promptsDir, { recursive: true });
+		writeFileSync(join(cwd, ".pi", "settings.json"), JSON.stringify({ prompts: ["prompts"] }));
+		writeFileSync(join(promptsDir, "same.md"), '---\nthinking: medium\n---\nbody');
+
+		const result = loadPromptsWithModel(cwd);
+		assert.equal(result.prompts.get("same")?.thinking, "medium");
+		assert.doesNotMatch(result.diagnostics.map((item) => item.message).join("\n"), /conflicts with/);
+	});
+});
+
 test("loadPromptsWithModel skips reserved command names and surfaces diagnostics", () => {
 	withTempHome((root) => {
 		const cwd = join(root, "project");

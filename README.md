@@ -729,6 +729,15 @@ Commands show their configuration in the autocomplete description:
 /component       Create React component [sonnet] (user:frontend)
 ```
 
+## Prompt Locations
+
+Extension-loaded templates can live in:
+
+- `~/.pi/agent/prompts/`
+- `<project>/.pi/prompts/`
+- paths listed in global `~/.pi/agent/settings.json` under `prompts`
+- paths listed in project `<project>/.pi/settings.json` under `prompts`
+
 ## Subdirectories
 
 Organize prompts in subdirectories for namespacing:
@@ -790,7 +799,7 @@ $@
 
 ## Limitations
 
-- Prompt files are reloaded on session start and whenever an extension-owned command runs. If you add a new prompt file mid-session, run any extension command (like `/chain-prompts`), start a new session, or reload pi to pick it up.
+- Prompt files are reloaded on session start and whenever an extension-owned command runs. If you add a new prompt file or update `settings.json.prompts` mid-session, run any extension command (like `/chain-prompts`), start a new session, or reload pi to pick it up.
 - Model restore state is in-memory. Closing pi mid-response loses it.
 - In chains, model-less steps inherit the chain-start model snapshot, not the previous step's model. This is intentional for deterministic behavior.
 - Delegated `subagent` prompts require [pi-subagents](https://github.com/nicobailon/pi-subagents/).

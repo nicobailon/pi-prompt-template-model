@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- Prompt templates with extension frontmatter are now discovered from Pi `settings.json.prompts` paths in addition to default prompt directories.
+
 ## [0.9.3] - 2026-04-28
 
 ### Fixed
