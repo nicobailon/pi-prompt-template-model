@@ -49,6 +49,19 @@ Start a Python REPL session and help me debug: $@
 
 Run `/debug-python some issue` and the agent switches to Sonnet, receives the tmux skill as context, and starts working. When it finishes, your previous model is restored.
 
+## Prompt Discovery
+
+The extension scans the default prompt directories and the same local prompt paths Pi loads from `settings.json`:
+
+- User defaults: `~/.pi/agent/prompts/`
+- Project defaults: `<cwd>/.pi/prompts/`
+- User settings: `~/.pi/agent/settings.json` `prompts` entries
+- Project settings: `<cwd>/.pi/settings.json` `prompts` entries
+
+Settings entries may point at directories or individual `.md` files. Absolute paths and `~/...` work. Relative user settings paths resolve from `~/.pi/agent`; relative project settings paths resolve from `<cwd>/.pi`. Pattern entries follow Pi's settings behavior: glob-style entries filter configured prompt paths, and `!`, `+`, or `-` entries exclude or force exact matches.
+
+Precedence follows Pi's local-resource order: project settings, project defaults, user settings, then user defaults. If the same file is reachable through both settings and a default directory, it is loaded once by canonical path. Malformed settings files or invalid configured paths produce warnings while the rest of discovery continues.
+
 ## Frontmatter Reference
 
 All fields are optional. Templates that don't use any extension features (no `model`, `skill`, `thinking`, etc.) are left to pi's default prompt loader.

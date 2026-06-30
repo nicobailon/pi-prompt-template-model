@@ -71,5 +71,8 @@
     "skills": [
       "./skills"
     ]
+  },
+  "dependencies": {
+    "minimatch": "^10.2.5"
   }
 }
