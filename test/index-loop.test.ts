@@ -1174,6 +1174,32 @@ test("queued run-prompt restores pending session state before executing queued c
 	});
 });
 
+test("idle agent_end does not read context model when no restore or tool command is pending", async () => {
+	await withTempHome(async (root) => {
+		const cwd = join(root, "project");
+		mkdirSync(join(cwd, ".pi", "prompts"), { recursive: true });
+
+		const pi = new FakePi();
+		promptModelExtension(pi as never);
+		const { ctx } = createContext(cwd, pi);
+		await pi.emit("session_start", {}, ctx);
+
+		let modelReads = 0;
+		const idleCtx = Object.create(ctx, {
+			model: {
+				get() {
+					modelReads++;
+					throw new Error("idle agent_end read ctx.model");
+				},
+			},
+		});
+
+		await pi.emit("agent_end", {}, idleCtx);
+
+		assert.equal(modelReads, 0);
+	});
+});
+
 test("prompt loop does not report completion when execution throws mid-run", async () => {
 	await withTempHome(async (root) => {
 		const cwd = join(root, "project");
