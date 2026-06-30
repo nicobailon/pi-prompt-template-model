@@ -73,16 +73,9 @@ function withTempHome(run: (root: string) => Promise<void>) {
 	const root = mkdtempSync(join(tmpdir(), "pi-prompt-subagent-index-"));
 	const prevHome = process.env.HOME;
 	process.env.HOME = root;
-	const runtimeRoot = join(root, "runtime-subagent");
-	mkdirSync(runtimeRoot, { recursive: true });
-	writeFileSync(join(runtimeRoot, "agents.js"), "export function discoverAgents(){ return { agents: [{ name: 'delegate' }, { name: 'reviewer' }, { name: 'worker' }, { name: 'simplifier' }] }; }");
-	const prevRuntime = process.env.PI_SUBAGENT_RUNTIME_ROOT;
-	process.env.PI_SUBAGENT_RUNTIME_ROOT = runtimeRoot;
 	return run(root).finally(() => {
 		if (prevHome === undefined) delete process.env.HOME;
 		else process.env.HOME = prevHome;
-		if (prevRuntime === undefined) delete process.env.PI_SUBAGENT_RUNTIME_ROOT;
-		else process.env.PI_SUBAGENT_RUNTIME_ROOT = prevRuntime;
 		rmSync(root, { recursive: true, force: true });
 	});
 }

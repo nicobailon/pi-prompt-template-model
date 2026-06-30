@@ -7,6 +7,8 @@
 
 ### Fixed
 - Prompt commands now initialize from the active session cwd instead of `process.cwd()`, and extension-owned Pi paths use Pi's current config-directory helpers.
+- Delegated prompt execution now uses the loaded `pi-subagents` event bridge instead of importing `pi-subagents` internals for agent discovery.
+- Prompt templates listed in user or project `settings.json` `prompts` paths now receive this extension's frontmatter handling, including `model`, `thinking`, and `skill`.
 
 ## [0.9.3] - 2026-04-28
 

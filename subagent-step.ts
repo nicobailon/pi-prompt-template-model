@@ -11,7 +11,6 @@ import {
 	DEFAULT_SUBAGENT_NAME,
 	appendDelegatedLiveOutput,
 	clearDelegatedLiveState,
-	ensureSubagentRuntime,
 	getDelegatedLiveState,
 	PROMPT_TEMPLATE_SUBAGENT_CANCEL_EVENT,
 	PROMPT_TEMPLATE_SUBAGENT_MESSAGE_TYPE,
@@ -19,7 +18,6 @@ import {
 	PROMPT_TEMPLATE_SUBAGENT_RESPONSE_EVENT,
 	PROMPT_TEMPLATE_SUBAGENT_STARTED_EVENT,
 	PROMPT_TEMPLATE_SUBAGENT_UPDATE_EVENT,
-	resolveDelegatedAgent,
 	updateDelegatedLiveState,
 	type DelegatedSubagentParallelResult,
 	type DelegatedSubagentRequest,
@@ -169,7 +167,6 @@ async function prepareDelegatedTask(
 	override: SubagentOverride | undefined,
 	inheritedModel: Model<any> | undefined,
 	taskPreamble: string | undefined,
-	runtime: Awaited<ReturnType<typeof ensureSubagentRuntime>>,
 ): Promise<PreparedDelegatedTask> {
 	const requestedAgent = resolveDelegationName(task.prompt, override);
 	if (!requestedAgent) {
@@ -179,7 +176,7 @@ async function prepareDelegatedTask(
 	if (effectiveCwd !== ctx.cwd && !existsSync(effectiveCwd)) {
 		throw new Error(`cwd directory does not exist: ${effectiveCwd}`);
 	}
-	const agent = resolveDelegatedAgent(runtime, effectiveCwd, requestedAgent);
+	const agent = requestedAgent;
 	const preparationOptions = inheritedModel === undefined ? undefined : { inheritedModel };
 	const prepared = await preparePromptExecution(
 		task.prompt,
@@ -340,7 +337,7 @@ async function requestDelegatedRun(
 		const startTimeoutMs = Number(process.env.PI_PROMPT_SUBAGENT_START_TIMEOUT_MS ?? "15000");
 		const effectiveTimeout = Number.isFinite(startTimeoutMs) && startTimeoutMs > 0 ? startTimeoutMs : 15_000;
 		const startTimeout = setTimeout(() => {
-			finish(() => reject(new Error(`Delegated subagent \`${requestLabel}\` did not start within ${Math.round(effectiveTimeout / 1000)}s. Check that the subagent extension is loaded.`)));
+			finish(() => reject(new Error(`Delegated subagent \`${requestLabel}\` did not start within ${Math.round(effectiveTimeout / 1000)}s. Check that the pi-subagents extension is loaded.`)));
 		}, effectiveTimeout);
 
 		const onStarted = (data: unknown) => {
@@ -528,8 +525,8 @@ async function requestDelegatedRun(
 		if (!started && done) return; // already finished (e.g. response came synchronously)
 		if (!started) {
 			finish(() => reject(new Error(
-				`No subagent runtime responded for \`${requestLabel}\`. ` +
-				`Ensure the subagent extension is loaded and has no name conflicts with other extensions.`,
+				`No loaded pi-subagents bridge responded for \`${requestLabel}\`. ` +
+				`Install or load pi-subagents and make sure no extension name conflicts are blocking it.`,
 			)));
 			return;
 		}
@@ -538,7 +535,6 @@ async function requestDelegatedRun(
 
 export async function executeSubagentPromptStep(options: DelegatedPromptOptions): Promise<DelegatedPromptOutcome | undefined> {
 	const { pi, ctx, currentModel, override, signal, inheritedModel, taskPreamble, allowPartialFailures } = options;
-	const runtime = await ensureSubagentRuntime(ctx.cwd);
 	const isParallelRequest = "parallel" in options;
 
 	const tasks = isParallelRequest
@@ -548,7 +544,7 @@ export async function executeSubagentPromptStep(options: DelegatedPromptOptions)
 
 	const preparedTasks: PreparedDelegatedTask[] = [];
 	for (const task of tasks) {
-		const preparedTask = await prepareDelegatedTask(task, ctx, currentModel, override, inheritedModel, taskPreamble, runtime);
+		const preparedTask = await prepareDelegatedTask(task, ctx, currentModel, override, inheritedModel, taskPreamble);
 		preparedTasks.push(preparedTask);
 	}
 

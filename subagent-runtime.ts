@@ -1,7 +1,3 @@
-import { existsSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
-
 export const PROMPT_TEMPLATE_SUBAGENT_REQUEST_EVENT = "prompt-template:subagent:request";
 export const PROMPT_TEMPLATE_SUBAGENT_STARTED_EVENT = "prompt-template:subagent:started";
 export const PROMPT_TEMPLATE_SUBAGENT_RESPONSE_EVENT = "prompt-template:subagent:response";
@@ -93,66 +89,7 @@ export interface DelegatedSubagentLiveState {
 	updatedAt: number;
 }
 
-interface RuntimeAgent {
-	name: string;
-}
-
-interface DiscoverAgentsResult {
-	agents: RuntimeAgent[];
-}
-
-type DiscoverAgentsFn = (cwd: string, scope: "user" | "project" | "both") => DiscoverAgentsResult;
-
-export interface SubagentRuntime {
-	root: string;
-	discoverAgents: DiscoverAgentsFn;
-}
-
-let runtimeCache: SubagentRuntime | null = null;
 const delegatedLiveState = new Map<string, DelegatedSubagentLiveState>();
-
-function runtimeCandidates(cwd: string): string[] {
-	const fromEnv = process.env.PI_SUBAGENT_RUNTIME_ROOT?.trim();
-	if (fromEnv) return [resolve(fromEnv)];
-	const localSibling = resolve(dirname(fileURLToPath(import.meta.url)), "..", "pi-subagents");
-	return [
-		resolve(cwd, ".pi", "npm", "node_modules", "pi-subagents"),
-		localSibling,
-	];
-}
-
-function findSubagentRoot(cwd: string): string | undefined {
-	for (const candidate of runtimeCandidates(cwd)) {
-		if (existsSync(join(candidate, "agents.ts")) || existsSync(join(candidate, "agents.js"))) {
-			return candidate;
-		}
-	}
-	return undefined;
-}
-
-async function importRuntimeModule(root: string, baseName: string): Promise<unknown> {
-	const candidates = [
-		join(root, `${baseName}.ts`),
-		join(root, `${baseName}.mts`),
-		join(root, `${baseName}.js`),
-		join(root, `${baseName}.mjs`),
-	];
-
-	let lastError: unknown;
-	for (const filePath of candidates) {
-		if (!existsSync(filePath)) continue;
-		try {
-			return await import(pathToFileURL(filePath).href);
-		} catch (error) {
-			lastError = error;
-		}
-	}
-
-	if (lastError !== undefined) {
-		throw lastError;
-	}
-	throw new Error(`Missing runtime module: ${baseName}`);
-}
 
 export function updateDelegatedLiveState(requestId: string, update: Partial<DelegatedSubagentLiveState>): void {
 	const now = Date.now();
@@ -209,39 +146,4 @@ export function getDelegatedLiveState(requestId: string): DelegatedSubagentLiveS
 
 export function clearDelegatedLiveState(requestId: string): void {
 	delegatedLiveState.delete(requestId);
-}
-
-export async function ensureSubagentRuntime(cwd: string): Promise<SubagentRuntime> {
-	const root = findSubagentRoot(cwd);
-	if (!root) {
-		throw new Error(
-			"Delegated prompt execution requires pi-subagents. Install it with `pi install npm:pi-subagents` or set PI_SUBAGENT_RUNTIME_ROOT.",
-		);
-	}
-
-	if (runtimeCache && runtimeCache.root === root) {
-		return runtimeCache;
-	}
-
-	const module = await importRuntimeModule(root, "agents");
-	const discoverAgents = (module as { discoverAgents?: unknown }).discoverAgents;
-	if (typeof discoverAgents !== "function") {
-		throw new Error(`Invalid subagent runtime at ${root}: expected discoverAgents(cwd, scope).`);
-	}
-
-	runtimeCache = {
-		root,
-		discoverAgents: discoverAgents as DiscoverAgentsFn,
-	};
-	return runtimeCache;
-}
-
-export function resolveDelegatedAgent(runtime: SubagentRuntime, cwd: string, requested: string): string {
-	const discovered = runtime.discoverAgents(cwd, "both");
-	if (!discovered.agents.some((agent) => agent.name === requested)) {
-		throw new Error(
-			`Delegated subagent \`${requested}\` not found. Available agents: ${discovered.agents.map((a) => a.name).join(", ") || "none"}.`,
-		);
-	}
-	return requested;
 }

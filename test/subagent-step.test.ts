@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { executeSubagentPromptStep } from "../subagent-step.ts";
@@ -13,19 +13,9 @@ import {
 	getDelegatedLiveState,
 } from "../subagent-runtime.ts";
 
-function withRuntime(
-	run: (root: string) => Promise<void>,
-	agentsSource = "export function discoverAgents(){ return { agents: [{ name: 'delegate' }, { name: 'reviewer' }] }; }",
-) {
+function withDelegationBridge(run: (root: string) => Promise<void>) {
 	const root = mkdtempSync(join(tmpdir(), "pi-prompt-subagent-step-"));
-	const runtimeRoot = join(root, "subagent");
-	mkdirSync(runtimeRoot, { recursive: true });
-	writeFileSync(join(runtimeRoot, "agents.js"), agentsSource);
-	const previous = process.env.PI_SUBAGENT_RUNTIME_ROOT;
-	process.env.PI_SUBAGENT_RUNTIME_ROOT = runtimeRoot;
 	return run(root).finally(() => {
-		if (previous === undefined) delete process.env.PI_SUBAGENT_RUNTIME_ROOT;
-		else process.env.PI_SUBAGENT_RUNTIME_ROOT = previous;
 		rmSync(root, { recursive: true, force: true });
 	});
 }
@@ -132,7 +122,7 @@ const prompt = {
 } as any;
 
 test("executeSubagentPromptStep returns delegated change info", async () => {
-	await withRuntime(async (root) => {
+	await withDelegationBridge(async (root) => {
 		const pi = createPi();
 		const ctx = createCtx(root);
 		pi.events.on(PROMPT_TEMPLATE_SUBAGENT_REQUEST_EVENT, (data) => {
@@ -166,7 +156,7 @@ test("executeSubagentPromptStep returns delegated change info", async () => {
 });
 
 test("executeSubagentPromptStep forwards prompt cwd to delegated request", async () => {
-	await withRuntime(async (root) => {
+	await withDelegationBridge(async (root) => {
 		const pi = createPi();
 		const ctx = createCtx(root);
 		const delegatedCwd = join(root, "delegated-cwd");
@@ -195,39 +185,39 @@ test("executeSubagentPromptStep forwards prompt cwd to delegated request", async
 	});
 });
 
-test("executeSubagentPromptStep resolves project agents from the delegated cwd", async () => {
-	await withRuntime(
-		async (root) => {
-			const pi = createPi();
-			const ctx = createCtx(join(root, "host-project"));
-			const delegatedCwd = join(root, "delegated-project");
-			mkdirSync(delegatedCwd, { recursive: true });
+test("executeSubagentPromptStep forwards custom agents to the loaded bridge", async () => {
+	await withDelegationBridge(async (root) => {
+		const pi = createPi();
+		const ctx = createCtx(join(root, "host-project"));
+		const delegatedCwd = join(root, "delegated-project");
+		mkdirSync(delegatedCwd, { recursive: true });
+		let requestAgent: string | undefined;
 
-			pi.events.on(PROMPT_TEMPLATE_SUBAGENT_REQUEST_EVENT, (data) => {
-				const request = data as any;
-				pi.events.emit(PROMPT_TEMPLATE_SUBAGENT_STARTED_EVENT, { requestId: request.requestId });
-				pi.events.emit(PROMPT_TEMPLATE_SUBAGENT_RESPONSE_EVENT, {
-					...request,
-					messages: [{ role: "assistant", content: [{ type: "text", text: "Done." }] }],
-					isError: false,
-				});
+		pi.events.on(PROMPT_TEMPLATE_SUBAGENT_REQUEST_EVENT, (data) => {
+			const request = data as any;
+			requestAgent = request.agent;
+			pi.events.emit(PROMPT_TEMPLATE_SUBAGENT_STARTED_EVENT, { requestId: request.requestId });
+			pi.events.emit(PROMPT_TEMPLATE_SUBAGENT_RESPONSE_EVENT, {
+				...request,
+				messages: [{ role: "assistant", content: [{ type: "text", text: "Done." }] }],
+				isError: false,
 			});
+		});
 
-			const result = await executeSubagentPromptStep({
-				pi,
-				prompt: { ...prompt, subagent: "special", cwd: delegatedCwd },
-				args: [],
-				ctx,
-				currentModel: ctx.model,
-			});
-			assert.equal(result?.agent, "special");
-		},
-		"export function discoverAgents(cwd){ if (cwd.endsWith('delegated-project')) return { agents: [{ name: 'special' }] }; return { agents: [{ name: 'delegate' }] }; }",
-	);
+		const result = await executeSubagentPromptStep({
+			pi,
+			prompt: { ...prompt, subagent: "special", cwd: delegatedCwd },
+			args: [],
+			ctx,
+			currentModel: ctx.model,
+		});
+		assert.equal(requestAgent, "special");
+		assert.equal(result?.agent, "special");
+	});
 });
 
 test("executeSubagentPromptStep fails on delegated error response", async () => {
-	await withRuntime(async (root) => {
+	await withDelegationBridge(async (root) => {
 		const pi = createPi();
 		const ctx = createCtx(root);
 		pi.events.on(PROMPT_TEMPLATE_SUBAGENT_REQUEST_EVENT, (data) => {
@@ -256,7 +246,7 @@ test("executeSubagentPromptStep fails on delegated error response", async () => 
 });
 
 test("executeSubagentPromptStep fails when delegated response has no assistant text", async () => {
-	await withRuntime(async (root) => {
+	await withDelegationBridge(async (root) => {
 		const pi = createPi();
 		const ctx = createCtx(root);
 		pi.events.on(PROMPT_TEMPLATE_SUBAGENT_REQUEST_EVENT, (data) => {
@@ -284,7 +274,7 @@ test("executeSubagentPromptStep fails when delegated response has no assistant t
 });
 
 test("executeSubagentPromptStep fails immediately when no bridge is listening", async () => {
-	await withRuntime(async (root) => {
+	await withDelegationBridge(async (root) => {
 		const pi = createPi();
 		const ctx = createCtx(root);
 		// No listener registered for REQUEST_EVENT — simulates subagent extension
@@ -298,13 +288,13 @@ test("executeSubagentPromptStep fails immediately when no bridge is listening", 
 					ctx,
 					currentModel: ctx.model,
 				}),
-			/no subagent runtime responded/i,
+			/no loaded pi-subagents bridge responded/i,
 		);
 	});
 });
 
 test("executeSubagentPromptStep fast-fail error mentions the agent name", async () => {
-	await withRuntime(async (root) => {
+	await withDelegationBridge(async (root) => {
 		const pi = createPi();
 		const ctx = createCtx(root);
 		await assert.rejects(
@@ -317,7 +307,7 @@ test("executeSubagentPromptStep fast-fail error mentions the agent name", async 
 					currentModel: ctx.model,
 				}),
 			(error: Error) => {
-				assert.match(error.message, /no subagent runtime responded/i);
+				assert.match(error.message, /no loaded pi-subagents bridge responded/i);
 				assert.match(error.message, /delegate/);
 				assert.ok(!error.message.includes("do work"), "should not include prompt content in error");
 				return true;
@@ -326,10 +316,21 @@ test("executeSubagentPromptStep fast-fail error mentions the agent name", async 
 	});
 });
 
-test("executeSubagentPromptStep fails when requested agent does not exist", async () => {
-	await withRuntime(async (root) => {
+test("executeSubagentPromptStep preserves missing-agent errors from the loaded bridge", async () => {
+	await withDelegationBridge(async (root) => {
 		const pi = createPi();
 		const ctx = createCtx(root);
+		pi.events.on(PROMPT_TEMPLATE_SUBAGENT_REQUEST_EVENT, (data) => {
+			const request = data as any;
+			pi.events.emit(PROMPT_TEMPLATE_SUBAGENT_STARTED_EVENT, { requestId: request.requestId });
+			pi.events.emit(PROMPT_TEMPLATE_SUBAGENT_RESPONSE_EVENT, {
+				...request,
+				messages: [],
+				isError: true,
+				errorText: "Delegated subagent `missing` not found. Available agents: delegate, reviewer.",
+			});
+		});
+
 		await assert.rejects(
 			() =>
 				executeSubagentPromptStep({
@@ -345,7 +346,7 @@ test("executeSubagentPromptStep fails when requested agent does not exist", asyn
 });
 
 test("executeSubagentPromptStep emits cancel on escape in UI mode", async () => {
-	await withRuntime(async (root) => {
+	await withDelegationBridge(async (root) => {
 		const pi = createPi();
 		const { ctx, sendInput } = createInteractiveCtx(root);
 		let cancelledRequestId: string | undefined;
@@ -376,7 +377,7 @@ test("executeSubagentPromptStep emits cancel on escape in UI mode", async () => 
 });
 
 test("executeSubagentPromptStep emits cancel on abort signal", async () => {
-	await withRuntime(async (root) => {
+	await withDelegationBridge(async (root) => {
 		const pi = createPi();
 		const ctx = createCtx(root);
 		const controller = new AbortController();
@@ -409,7 +410,7 @@ test("executeSubagentPromptStep emits cancel on abort signal", async () => {
 });
 
 test("executeSubagentPromptStep delegates parallel prompts with per-task cwd, taskPrefix, and aggregate text", async () => {
-	await withRuntime(async (root) => {
+	await withDelegationBridge(async (root) => {
 		const pi = createPi();
 		const ctx = createCtx(root);
 		const workerA = join(root, "worker-a");
@@ -489,7 +490,7 @@ test("executeSubagentPromptStep delegates parallel prompts with per-task cwd, ta
 });
 
 test("executeSubagentPromptStep rejects mixed cwd values when worktree is enabled", async () => {
-	await withRuntime(async (root) => {
+	await withDelegationBridge(async (root) => {
 		const pi = createPi();
 		const ctx = createCtx(root);
 		const workerA = join(root, "worker-a");
@@ -515,7 +516,7 @@ test("executeSubagentPromptStep rejects mixed cwd values when worktree is enable
 });
 
 test("executeSubagentPromptStep prefers aggregate parallel status over first-task tool status", async () => {
-	await withRuntime(async (root) => {
+	await withDelegationBridge(async (root) => {
 		const pi = createPi();
 		const ctx = createCtx(root);
 		ctx.hasUI = true;
@@ -564,7 +565,7 @@ test("executeSubagentPromptStep prefers aggregate parallel status over first-tas
 });
 
 test("executeSubagentPromptStep keeps single-task status running between tool calls", async () => {
-	await withRuntime(async (root) => {
+	await withDelegationBridge(async (root) => {
 		const pi = createPi();
 		const ctx = createCtx(root);
 		ctx.hasUI = true;
@@ -602,7 +603,7 @@ test("executeSubagentPromptStep keeps single-task status running between tool ca
 });
 
 test("executeSubagentPromptStep avoids duplicating single-task output lines from mirrored progress payloads", async () => {
-	await withRuntime(async (root) => {
+	await withDelegationBridge(async (root) => {
 		const pi = createPi();
 		const ctx = createCtx(root);
 		let capturedOutput: string[] = [];
@@ -638,7 +639,7 @@ test("executeSubagentPromptStep avoids duplicating single-task output lines from
 });
 
 test("executeSubagentPromptStep keeps identical consecutive output lines from different parallel tasks", async () => {
-	await withRuntime(async (root) => {
+	await withDelegationBridge(async (root) => {
 		const pi = createPi();
 		const ctx = createCtx(root);
 		let capturedOutput: string[] = [];
@@ -680,7 +681,7 @@ test("executeSubagentPromptStep keeps identical consecutive output lines from di
 });
 
 test("executeSubagentPromptStep avoids duplicating unchanged task output lines across updates", async () => {
-	await withRuntime(async (root) => {
+	await withDelegationBridge(async (root) => {
 		const pi = createPi();
 		const ctx = createCtx(root);
 		let capturedOutput: string[] = [];
@@ -729,7 +730,7 @@ test("executeSubagentPromptStep avoids duplicating unchanged task output lines a
 });
 
 test("executeSubagentPromptStep keeps parallel output history when top-level progress includes recentOutputLines", async () => {
-	await withRuntime(async (root) => {
+	await withDelegationBridge(async (root) => {
 		const pi = createPi();
 		const ctx = createCtx(root);
 		let capturedOutput: string[] = [];
@@ -780,7 +781,7 @@ test("executeSubagentPromptStep keeps parallel output history when top-level pro
 });
 
 test("executeSubagentPromptStep preserves per-task model metadata when updates omit model", async () => {
-	await withRuntime(async (root) => {
+	await withDelegationBridge(async (root) => {
 		const pi = createPi();
 		const ctx = createCtx(root);
 		let capturedModels: Array<string | undefined> = [];
@@ -829,7 +830,7 @@ test("executeSubagentPromptStep preserves per-task model metadata when updates o
 });
 
 test("executeSubagentPromptStep fails on parallel task errors", async () => {
-	await withRuntime(async (root) => {
+	await withDelegationBridge(async (root) => {
 		const pi = createPi();
 		const ctx = createCtx(root);
 
@@ -865,7 +866,7 @@ test("executeSubagentPromptStep fails on parallel task errors", async () => {
 });
 
 test("executeSubagentPromptStep prepends taskPreamble for delegated single tasks", async () => {
-	await withRuntime(async (root) => {
+	await withDelegationBridge(async (root) => {
 		const pi = createPi();
 		const ctx = createCtx(root);
 		let delegatedTask = "";
@@ -894,7 +895,7 @@ test("executeSubagentPromptStep prepends taskPreamble for delegated single tasks
 });
 
 test("executeSubagentPromptStep prepends taskPreamble for every delegated parallel task", async () => {
-	await withRuntime(async (root) => {
+	await withDelegationBridge(async (root) => {
 		const pi = createPi();
 		const ctx = createCtx(root);
 		let delegatedTasks: string[] = [];
@@ -933,7 +934,7 @@ test("executeSubagentPromptStep prepends taskPreamble for every delegated parall
 });
 
 test("executeSubagentPromptStep ignores taskPreamble when inheritContext is true", async () => {
-	await withRuntime(async (root) => {
+	await withDelegationBridge(async (root) => {
 		const pi = createPi();
 		const ctx = createCtx(root);
 		let delegatedTask = "";
@@ -962,7 +963,7 @@ test("executeSubagentPromptStep ignores taskPreamble when inheritContext is true
 });
 
 test("executeSubagentPromptStep keeps task unchanged when taskPreamble is omitted", async () => {
-	await withRuntime(async (root) => {
+	await withDelegationBridge(async (root) => {
 		const pi = createPi();
 		const ctx = createCtx(root);
 		let delegatedTask = "";
