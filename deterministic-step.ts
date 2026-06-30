@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
-import type { PromptWithModel, DeterministicStep, DeterministicExecution, DeterministicEnv } from "./prompt-loader.js";
+import type { PromptWithModel, DeterministicStep, DeterministicExecution, DeterministicEnv } from "./prompt-loader.ts";
 
 export const PROMPT_TEMPLATE_DETERMINISTIC_MESSAGE_TYPE = "prompt-template-deterministic";
 export const PROMPT_TEMPLATE_DETERMINISTIC_COMPLETION_MESSAGE_TYPE = "prompt-template-deterministic-complete";

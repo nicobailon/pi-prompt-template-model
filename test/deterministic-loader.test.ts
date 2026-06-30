@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildPromptCommandDescription, loadPromptsWithModel } from "../prompt-loader.js";
+import { buildPromptCommandDescription, loadPromptsWithModel } from "../prompt-loader.ts";
 
 function withTempHome(run: (root: string) => void) {
 	const root = mkdtempSync(join(tmpdir(), "pi-prompt-template-model-deterministic-loader-"));

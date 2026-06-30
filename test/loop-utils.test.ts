@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { didIterationMakeChanges, generateBoomerangSummary, generateChainStepSummary, generateIterationSummary, getIterationEntries } from "../loop-utils.js";
+import { didIterationMakeChanges, generateBoomerangSummary, generateChainStepSummary, generateIterationSummary, getIterationEntries } from "../loop-utils.ts";
 
 const delegatedEntry = {
 	id: "delegated-1",

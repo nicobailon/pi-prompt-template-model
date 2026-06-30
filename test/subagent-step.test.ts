@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { executeSubagentPromptStep } from "../subagent-step.js";
+import { executeSubagentPromptStep } from "../subagent-step.ts";
 import {
 	PROMPT_TEMPLATE_SUBAGENT_CANCEL_EVENT,
 	PROMPT_TEMPLATE_SUBAGENT_REQUEST_EVENT,
@@ -11,7 +11,7 @@ import {
 	PROMPT_TEMPLATE_SUBAGENT_STARTED_EVENT,
 	PROMPT_TEMPLATE_SUBAGENT_UPDATE_EVENT,
 	getDelegatedLiveState,
-} from "../subagent-runtime.js";
+} from "../subagent-runtime.ts";
 
 function withRuntime(
 	run: (root: string) => Promise<void>,

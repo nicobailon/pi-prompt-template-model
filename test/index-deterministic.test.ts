@@ -3,11 +3,11 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import promptModelExtension from "../index.js";
+import promptModelExtension from "../index.ts";
 import {
 	PROMPT_TEMPLATE_DETERMINISTIC_COMPLETION_MESSAGE_TYPE,
 	PROMPT_TEMPLATE_DETERMINISTIC_MESSAGE_TYPE,
-} from "../deterministic-step.js";
+} from "../deterministic-step.ts";
 
 const MODEL = { provider: "anthropic", id: "claude-sonnet-4-20250514" };
 

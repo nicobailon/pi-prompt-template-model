@@ -1,12 +1,12 @@
 import { existsSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-import type { AssistantMessage, Message } from "@mariozechner/pi-ai";
-import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
-import type { Model } from "@mariozechner/pi-ai";
-import { Key, matchesKey } from "@mariozechner/pi-tui";
-import { preparePromptExecution } from "./prompt-execution.js";
-import type { PromptWithModel } from "./prompt-loader.js";
-import { notify } from "./notifications.js";
+import type { AssistantMessage, Message } from "@earendil-works/pi-ai";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { Model } from "@earendil-works/pi-ai";
+import { Key, matchesKey } from "@earendil-works/pi-tui";
+import { preparePromptExecution } from "./prompt-execution.ts";
+import type { PromptWithModel } from "./prompt-loader.ts";
+import { notify } from "./notifications.ts";
 import {
 	DEFAULT_SUBAGENT_NAME,
 	appendDelegatedLiveOutput,
@@ -27,9 +27,9 @@ import {
 	type DelegatedSubagentTask,
 	type DelegatedSubagentTaskProgress,
 	type DelegatedSubagentUpdate,
-} from "./subagent-runtime.js";
-import type { SubagentOverride } from "./args.js";
-import { createDelegatedProgressWidget, DELEGATED_WIDGET_KEY } from "./subagent-widget.js";
+} from "./subagent-runtime.ts";
+import type { SubagentOverride } from "./args.ts";
+import { createDelegatedProgressWidget, DELEGATED_WIDGET_KEY } from "./subagent-widget.ts";
 
 interface DelegatedPromptBaseOptions {
 	pi: ExtensionAPI;

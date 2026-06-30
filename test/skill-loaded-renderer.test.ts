@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { renderSkillLoaded } from "../skill-loaded-renderer.js";
+import { renderSkillLoaded } from "../skill-loaded-renderer.ts";
 
 test("renderSkillLoaded fails safe when message details are missing", () => {
 	const rendered = renderSkillLoaded(

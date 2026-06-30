@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { preparePromptExecution } from "../prompt-execution.js";
+import { preparePromptExecution } from "../prompt-execution.ts";
 
 const model = { provider: "anthropic", id: "claude-sonnet-4-20250514" };
 const registry = {

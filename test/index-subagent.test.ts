@@ -3,12 +3,12 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import promptModelExtension from "../index.js";
+import promptModelExtension from "../index.ts";
 import {
 	PROMPT_TEMPLATE_SUBAGENT_REQUEST_EVENT,
 	PROMPT_TEMPLATE_SUBAGENT_RESPONSE_EVENT,
 	PROMPT_TEMPLATE_SUBAGENT_STARTED_EVENT,
-} from "../subagent-runtime.js";
+} from "../subagent-runtime.ts";
 
 const MODEL = { provider: "anthropic", id: "claude-sonnet-4-20250514" };
 

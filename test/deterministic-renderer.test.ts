@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import type { Theme } from "@mariozechner/pi-coding-agent";
-import { renderDeterministicCompletion, renderDeterministicResult } from "../deterministic-renderer.js";
+import type { Theme } from "@earendil-works/pi-coding-agent";
+import { renderDeterministicCompletion, renderDeterministicResult } from "../deterministic-renderer.ts";
 
 const theme = {
 	fg(_token: string, text: string) { return text; },

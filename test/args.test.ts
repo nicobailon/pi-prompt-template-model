@@ -9,7 +9,7 @@ import {
 	extractWorktreeFlag,
 	parseCommandArgs,
 	substituteArgs,
-} from "../args.js";
+} from "../args.ts";
 
 test("parseCommandArgs respects quoted segments", () => {
 	assert.deepEqual(parseCommandArgs('alpha "two words" beta'), ["alpha", "two words", "beta"]);

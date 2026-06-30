@@ -1,9 +1,9 @@
 import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
-import type { ThinkingLevel } from "@mariozechner/pi-agent-core";
-import { parseFrontmatter } from "@mariozechner/pi-coding-agent";
-import { parseChainDeclaration } from "./chain-parser.js";
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import { CONFIG_DIR_NAME, getAgentDir, parseFrontmatter } from "@earendil-works/pi-coding-agent";
+import { parseChainDeclaration } from "./chain-parser.ts";
 
 const VALID_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
 export const RESERVED_COMMAND_NAMES = new Set([
@@ -1803,8 +1803,8 @@ function loadPromptsWithModelFromDir(
 }
 
 export function loadPromptsWithModel(cwd: string, includePlainPrompts = false): LoadPromptsWithModelResult {
-	const globalDir = join(homedir(), ".pi", "agent", "prompts");
-	const projectDir = resolve(cwd, ".pi", "prompts");
+	const globalDir = join(getAgentDir(), "prompts");
+	const projectDir = resolve(cwd, CONFIG_DIR_NAME, "prompts");
 	const promptMap = new Map<string, PromptWithModel>();
 	const diagnostics: PromptLoaderDiagnostic[] = [];
 
@@ -1911,7 +1911,7 @@ function findFirstExisting(paths: string[]): string | undefined {
 export function resolveSkillPath(skillName: string, cwd: string): string | undefined {
 	const projectDir = resolve(cwd);
 
-	const projectPiSkill = findFirstExisting(getSkillCandidates(resolve(projectDir, ".pi", "skills"), skillName));
+	const projectPiSkill = findFirstExisting(getSkillCandidates(resolve(projectDir, CONFIG_DIR_NAME, "skills"), skillName));
 	if (projectPiSkill) return projectPiSkill;
 
 	const repoRoot = findRepoRoot(projectDir);
@@ -1920,7 +1920,7 @@ export function resolveSkillPath(skillName: string, cwd: string): string | undef
 		if (projectAgentsSkill) return projectAgentsSkill;
 	}
 
-	const globalPiSkill = findFirstExisting(getSkillCandidates(join(homedir(), ".pi", "agent", "skills"), skillName));
+	const globalPiSkill = findFirstExisting(getSkillCandidates(join(getAgentDir(), "skills"), skillName));
 	if (globalPiSkill) return globalPiSkill;
 
 	return findFirstExisting(getSkillCandidates(join(homedir(), ".agents", "skills"), skillName));

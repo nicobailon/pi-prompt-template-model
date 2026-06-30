@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildDeterministicPreamble, formatDeterministicExecution, runDeterministicStep, shouldHandoffToLlm } from "../deterministic-step.js";
-import type { DeterministicStep } from "../prompt-loader.js";
+import { buildDeterministicPreamble, formatDeterministicExecution, runDeterministicStep, shouldHandoffToLlm } from "../deterministic-step.ts";
+import type { DeterministicStep } from "../prompt-loader.ts";
 
 async function withTempDir(run: (root: string) => Promise<void>) {
 	const root = mkdtempSync(join(tmpdir(), "pi-prompt-deterministic-step-"));

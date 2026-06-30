@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { renderTemplateConditionals } from "../template-conditionals.js";
+import { renderTemplateConditionals } from "../template-conditionals.ts";
 
 const model = { provider: "anthropic", id: "claude-sonnet-4-20250514" };
 

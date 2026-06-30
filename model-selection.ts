@@ -1,5 +1,5 @@
-import type { Model } from "@mariozechner/pi-ai";
-import type { ResolvedModelRef } from "./template-conditionals.js";
+import type { Model } from "@earendil-works/pi-ai";
+import type { ResolvedModelRef } from "./template-conditionals.ts";
 
 const PREFERRED_PROVIDERS = ["openai-codex", "anthropic", "github-copilot", "openrouter"];
 

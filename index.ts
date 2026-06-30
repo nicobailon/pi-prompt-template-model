@@ -1,8 +1,8 @@
 import { existsSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
-import type { Model } from "@mariozechner/pi-ai";
-import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@mariozechner/pi-coding-agent";
-import type { ThinkingLevel } from "@mariozechner/pi-agent-core";
+import type { Model } from "@earendil-works/pi-ai";
+import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import {
 	extractChainContextFlag,
 	extractLineupOverrides,
@@ -14,12 +14,12 @@ import {
 	substituteArgs,
 	type LineupOverrideAction,
 	type SubagentOverride,
-} from "./args.js";
-import { parseChainSteps, parseChainDeclaration, type ChainStep, type ChainStepOrParallel, type ParallelChainStep } from "./chain-parser.js";
-import { generateBoomerangSummary, generateChainStepSummary, generateIterationSummary, didIterationMakeChanges, getIterationEntries, wasIterationAborted } from "./loop-utils.js";
-import { selectModelCandidate } from "./model-selection.js";
-import { notify, summarizePromptDiagnostics, diagnosticsFingerprint } from "./notifications.js";
-import { preparePromptExecution, renderPromptForResolvedModel } from "./prompt-execution.js";
+} from "./args.ts";
+import { parseChainSteps, parseChainDeclaration, type ChainStep, type ChainStepOrParallel, type ParallelChainStep } from "./chain-parser.ts";
+import { generateBoomerangSummary, generateChainStepSummary, generateIterationSummary, didIterationMakeChanges, getIterationEntries, wasIterationAborted } from "./loop-utils.ts";
+import { selectModelCandidate } from "./model-selection.ts";
+import { notify, summarizePromptDiagnostics, diagnosticsFingerprint } from "./notifications.ts";
+import { preparePromptExecution, renderPromptForResolvedModel } from "./prompt-execution.ts";
 import {
 	buildPromptCommandDescription,
 	expandCwdPath,
@@ -28,20 +28,20 @@ import {
 	resolveSkillPath,
 	type DelegationLineupSlot,
 	type PromptWithModel,
-} from "./prompt-loader.js";
-import { renderSkillLoaded, type SkillLoadedDetails } from "./skill-loaded-renderer.js";
-import { createToolManager } from "./tool-manager.js";
-import { executeSubagentPromptStep, type DelegatedPromptParallelResult } from "./subagent-step.js";
-import { DEFAULT_SUBAGENT_NAME, PROMPT_TEMPLATE_SUBAGENT_MESSAGE_TYPE } from "./subagent-runtime.js";
-import { renderDelegatedSubagentResult } from "./subagent-renderer.js";
+} from "./prompt-loader.ts";
+import { renderSkillLoaded, type SkillLoadedDetails } from "./skill-loaded-renderer.ts";
+import { createToolManager } from "./tool-manager.ts";
+import { executeSubagentPromptStep, type DelegatedPromptParallelResult } from "./subagent-step.ts";
+import { DEFAULT_SUBAGENT_NAME, PROMPT_TEMPLATE_SUBAGENT_MESSAGE_TYPE } from "./subagent-runtime.ts";
+import { renderDelegatedSubagentResult } from "./subagent-renderer.ts";
 import {
 	PROMPT_TEMPLATE_DETERMINISTIC_COMPLETION_MESSAGE_TYPE,
 	PROMPT_TEMPLATE_DETERMINISTIC_MESSAGE_TYPE,
 	buildDeterministicPreamble,
 	runDeterministicStep,
 	shouldHandoffToLlm,
-} from "./deterministic-step.js";
-import { renderDeterministicCompletion, renderDeterministicResult } from "./deterministic-renderer.js";
+} from "./deterministic-step.ts";
+import { renderDeterministicCompletion, renderDeterministicResult } from "./deterministic-renderer.ts";
 
 interface LoopState {
 	currentIteration: number;
@@ -1756,7 +1756,6 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 		);
 	}
 
-	refreshPrompts(process.cwd());
 	if (toolManager.isEnabled()) toolManager.ensureRegistered();
 
 	pi.registerCommand("chain-prompts", {

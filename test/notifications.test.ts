@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { notify } from "../notifications.js";
+import { notify } from "../notifications.ts";
 
 test("notify writes non-UI messages to stderr instead of stdout", () => {
 	const writes: string[] = [];

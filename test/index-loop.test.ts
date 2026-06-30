@@ -3,12 +3,12 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import promptModelExtension from "../index.js";
+import promptModelExtension from "../index.ts";
 import {
 	PROMPT_TEMPLATE_SUBAGENT_REQUEST_EVENT,
 	PROMPT_TEMPLATE_SUBAGENT_RESPONSE_EVENT,
 	PROMPT_TEMPLATE_SUBAGENT_STARTED_EVENT,
-} from "../subagent-runtime.js";
+} from "../subagent-runtime.ts";
 
 const MODEL_ID = "claude-sonnet-4-20250514";
 const ACTIVE_MODEL = { provider: "anthropic", id: MODEL_ID };
@@ -197,6 +197,34 @@ function createContext(
 		getNotifications: () => notifications,
 	};
 }
+
+test("initializes prompt commands from session cwd, not process cwd", async () => {
+	await withTempHome(async (root) => {
+		const processCwd = join(root, "process-cwd");
+		const sessionCwd = join(root, "session-cwd");
+		mkdirSync(join(processCwd, ".pi", "prompts"), { recursive: true });
+		mkdirSync(join(sessionCwd, ".pi", "prompts"), { recursive: true });
+		writeFileSync(join(processCwd, ".pi", "prompts", "process-only.md"), `---\nmodel: ${MODEL_ID}\n---\nprocess`);
+		writeFileSync(join(sessionCwd, ".pi", "prompts", "session-only.md"), `---\nmodel: ${MODEL_ID}\n---\nsession`);
+
+		const previousCwd = process.cwd();
+		try {
+			process.chdir(processCwd);
+			const pi = new FakePi();
+			promptModelExtension(pi as never);
+
+			assert.equal(pi.commands.has("process-only"), false);
+
+			const { ctx } = createContext(sessionCwd, pi);
+			await pi.emit("session_start", { reason: "startup" }, ctx);
+
+			assert.equal(pi.commands.has("session-only"), true);
+			assert.equal(pi.commands.has("process-only"), false);
+		} finally {
+			process.chdir(previousCwd);
+		}
+	});
+});
 
 function createBranchingContext(
 	cwd: string,

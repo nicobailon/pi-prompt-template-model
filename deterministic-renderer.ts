@@ -1,6 +1,6 @@
-import type { MessageRenderOptions, Theme } from "@mariozechner/pi-coding-agent";
-import { Box, Container, Spacer, Text } from "@mariozechner/pi-tui";
-import { formatDeterministicExecution, type DeterministicExecutionResult } from "./deterministic-step.js";
+import type { MessageRenderOptions, Theme } from "@earendil-works/pi-coding-agent";
+import { Box, Container, Spacer, Text } from "@earendil-works/pi-tui";
+import { formatDeterministicExecution, type DeterministicExecutionResult } from "./deterministic-step.ts";
 
 interface DeterministicMessage {
 	content?: unknown;

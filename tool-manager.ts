@@ -1,9 +1,8 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
-import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import { getAgentDir, type ExtensionAPI, type ExtensionCommandContext, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { notify } from "./notifications.js";
+import { notify } from "./notifications.ts";
 
 export interface ToolManagerDeps {
 	isActive(): boolean;
@@ -17,7 +16,7 @@ export function createToolManager(pi: ExtensionAPI, deps: ToolManagerDeps) {
 	let toolGuidance: string | null = null;
 	let toolRegistered = false;
 	let toolQueuedCommand: string | null = null;
-	const configPath = join(homedir(), ".pi", "agent", "prompt-template-model.json");
+	const configPath = join(getAgentDir(), "prompt-template-model.json");
 
 	try {
 		const rawConfig = JSON.parse(readFileSync(configPath, "utf-8"));
@@ -41,7 +40,7 @@ export function createToolManager(pi: ExtensionAPI, deps: ToolManagerDeps) {
 
 	function saveToolConfig() {
 		try {
-			mkdirSync(join(homedir(), ".pi", "agent"), { recursive: true });
+			mkdirSync(getAgentDir(), { recursive: true });
 			writeFileSync(configPath, JSON.stringify({ toolEnabled, toolGuidance }, null, 2));
 		} catch (error) {
 			process.stderr.write(

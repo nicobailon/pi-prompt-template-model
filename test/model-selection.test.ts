@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { selectModelCandidate } from "../model-selection.js";
+import { selectModelCandidate } from "../model-selection.ts";
 
 interface FakeModel {
 	provider: string;

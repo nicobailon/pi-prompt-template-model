@@ -1,5 +1,5 @@
-import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
-import type { PromptLoaderDiagnostic } from "./prompt-loader.js";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { PromptLoaderDiagnostic } from "./prompt-loader.ts";
 
 export function notify(
 	ctx: Pick<ExtensionContext, "hasUI" | "ui"> | undefined,

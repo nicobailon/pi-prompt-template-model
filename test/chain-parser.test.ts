@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseChainDeclaration, parseChainSteps } from "../chain-parser.js";
+import { parseChainDeclaration, parseChainSteps } from "../chain-parser.ts";
 
 test("parseChainDeclaration keeps the first valid per-step --loop and strips repeated loop tokens", () => {
 	const parsed = parseChainDeclaration("worker --loop 2 --loop 3");

@@ -1,4 +1,4 @@
-import { parseCommandArgs } from "./args.js";
+import { parseCommandArgs } from "./args.ts";
 
 export interface ChainStep {
 	name: string;

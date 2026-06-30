@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createDelegatedProgressWidget } from "../subagent-widget.js";
-import { clearDelegatedLiveState, updateDelegatedLiveState } from "../subagent-runtime.js";
+import { createDelegatedProgressWidget } from "../subagent-widget.ts";
+import { clearDelegatedLiveState, updateDelegatedLiveState } from "../subagent-runtime.ts";
 
 const theme = {
 	fg(_token: string, text: string) { return text; },
