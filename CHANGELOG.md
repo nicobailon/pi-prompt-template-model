@@ -6,6 +6,7 @@
 - Updated local Pi development dependencies to `@earendil-works/*` `0.80.3` and declared Pi core packages plus `typebox` as peer dependencies for package installs.
 
 ### Fixed
+- Inline prompt templates with `restore: true` now restore the previous model and thinking level on the prompt turn's `agent_end`, instead of one unrelated user turn later.
 - Prompt commands now initialize from the active session cwd instead of `process.cwd()`, and extension-owned Pi paths use Pi's current config-directory helpers.
 
 ## [0.9.3] - 2026-04-28
