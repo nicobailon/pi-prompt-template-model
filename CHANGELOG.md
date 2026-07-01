@@ -6,6 +6,7 @@
 - Updated local Pi development dependencies to `@earendil-works/*` `0.80.3` and declared Pi core packages plus `typebox` as peer dependencies for package installs.
 
 ### Fixed
+- Inline prompt templates with `restore: true` now restore the previous model and thinking level on the prompt turn's `agent_end`, instead of one unrelated user turn later.
 - Prompt commands now initialize from the active session cwd instead of `process.cwd()`, and extension-owned Pi paths use Pi's current config-directory helpers.
 - Delegated prompt execution now uses the loaded `pi-subagents` event bridge instead of importing `pi-subagents` internals for agent discovery.
 - Prompt templates listed in user or project `settings.json` `prompts` paths now receive this extension's frontmatter handling, including `model`, `thinking`, and `skill`.

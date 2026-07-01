@@ -84,6 +84,11 @@ interface PromptStepResult {
 	text?: string;
 }
 
+interface PromptTurnRestore {
+	originalModel: Model<any> | undefined;
+	originalThinking: ThinkingLevel | undefined;
+}
+
 const DEFAULT_COMPARE_REVIEWER_TASK = [
 	"Review the worker variants and produce findings only.",
 	"Required output:",
@@ -264,6 +269,7 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 		inheritedModel?: Model<any>,
 		taskPreamble?: string,
 		loopContext?: string,
+		promptTurnRestore?: PromptTurnRestore,
 	): Promise<PromptStepResult | "aborted"> {
 		let deterministicPreamble: string | undefined;
 		if (prompt.deterministic) {
@@ -376,6 +382,17 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 			pi.setThinkingLevel(prompt.thinking);
 		}
 		pendingSkillMessage = skillResolution.kind === "ready" ? skillResolution.message : undefined;
+
+		if (promptTurnRestore) {
+			const currentModel = getCurrentModel(ctx);
+			if (promptTurnRestore.originalModel && currentModel && !sameModel(promptTurnRestore.originalModel, currentModel)) {
+				previousModel = promptTurnRestore.originalModel;
+				previousThinking = promptTurnRestore.originalThinking;
+			}
+			if (prompt.thinking && previousThinking === undefined && prompt.thinking !== promptTurnRestore.originalThinking) {
+				previousThinking = promptTurnRestore.originalThinking;
+			}
+		}
 
 		const startId = ctx.sessionManager.getLeafId();
 		const effectiveContent = combinedTaskPreamble
@@ -1587,6 +1604,10 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 		};
 		const savedModel = getCurrentModel(ctx);
 		const savedThinking = pi.getThinkingLevel();
+		const isDelegatedPrompt = shouldDelegatePrompt(effectivePrompt, subagent.override);
+		const promptTurnRestore = !isDelegatedPrompt && prompt.restore
+			? { originalModel: savedModel, originalThinking: savedThinking }
+			: undefined;
 		const boomerangTargetId = effectivePrompt.boomerang ? ctx.sessionManager.getLeafId() : null;
 		const stepResult = await executePromptStep(
 			effectivePrompt,
@@ -1594,23 +1615,16 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 			ctx,
 			savedModel,
 			subagent.override,
+			undefined,
+			undefined,
+			undefined,
+			promptTurnRestore,
 		);
 		if (stepResult === "aborted") return;
-		if (shouldDelegatePrompt(effectivePrompt, subagent.override) && stepResult.text) {
+		if (isDelegatedPrompt && stepResult.text) {
 			pi.sendUserMessage(`[Delegated result: ${name}]\n\n${stepResult.text}`);
 			await waitForTurnStart(ctx);
 			await ctx.waitForIdle();
-		}
-
-		if (!shouldDelegatePrompt(effectivePrompt, subagent.override) && prompt.restore) {
-			const currentModel = getCurrentModel(ctx);
-			if (savedModel && currentModel && !sameModel(savedModel, currentModel)) {
-				previousModel = savedModel;
-				previousThinking = savedThinking;
-			}
-			if (effectivePrompt.thinking && previousThinking === undefined && effectivePrompt.thinking !== savedThinking) {
-				previousThinking = savedThinking;
-			}
 		}
 
 		if (effectivePrompt.boomerang) {

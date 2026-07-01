@@ -1161,6 +1161,93 @@ test("queued run-prompt restores pending session state before executing queued c
 	});
 });
 
+test("inline prompt restore true restores model and thinking on prompt turn agent_end", async () => {
+	await withTempHome(async (root) => {
+		const cwd = join(root, "project");
+		mkdirSync(join(cwd, ".pi", "prompts"), { recursive: true });
+		writeFileSync(
+			join(cwd, ".pi", "prompts", "deslop.md"),
+			"---\nmodel: anthropic/target-model\nthinking: high\nrestore: true\n---\nTASK:$@",
+		);
+
+		const baseModel = { provider: "anthropic", id: "base-model" };
+		const targetModel = { provider: "anthropic", id: "target-model" };
+		const models = [baseModel, targetModel];
+
+		const pi = new FakePi();
+		pi.currentModel = baseModel;
+		promptModelExtension(pi as never);
+
+		let ctxRef: any;
+		let agentEndDuringPrompt = false;
+		const { ctx } = createContext(cwd, pi, models, {
+			waitForIdle: async () => {
+				agentEndDuringPrompt = true;
+				assert.deepEqual(pi.setModelCalls, ["anthropic/target-model"]);
+				assert.deepEqual(pi.thinkingCalls, ["high"]);
+				await pi.emit("agent_end", {}, ctxRef);
+				assert.deepEqual(pi.setModelCalls, ["anthropic/target-model", "anthropic/base-model"]);
+				assert.deepEqual(pi.thinkingCalls, ["high", "medium"]);
+			},
+		});
+		ctxRef = ctx;
+		await pi.emit("session_start", {}, ctx);
+
+		const deslop = pi.commands.get("deslop");
+		assert.ok(deslop);
+		await deslop.handler("demo", ctx);
+
+		assert.equal(agentEndDuringPrompt, true);
+		assert.deepEqual(pi.userMessages, ["TASK:demo"]);
+		assert.deepEqual(pi.currentModel, baseModel);
+		assert.equal(pi.getThinkingLevel(), "medium");
+
+		await pi.emit("agent_end", {}, ctx);
+		assert.deepEqual(pi.setModelCalls, ["anthropic/target-model", "anthropic/base-model"]);
+		assert.deepEqual(pi.thinkingCalls, ["high", "medium"]);
+	});
+});
+
+test("inline prompt restore false leaves model and thinking active after prompt turn agent_end", async () => {
+	await withTempHome(async (root) => {
+		const cwd = join(root, "project");
+		mkdirSync(join(cwd, ".pi", "prompts"), { recursive: true });
+		writeFileSync(
+			join(cwd, ".pi", "prompts", "deslop.md"),
+			"---\nmodel: anthropic/target-model\nthinking: high\nrestore: false\n---\nTASK:$@",
+		);
+
+		const baseModel = { provider: "anthropic", id: "base-model" };
+		const targetModel = { provider: "anthropic", id: "target-model" };
+		const models = [baseModel, targetModel];
+
+		const pi = new FakePi();
+		pi.currentModel = baseModel;
+		promptModelExtension(pi as never);
+
+		let ctxRef: any;
+		const { ctx } = createContext(cwd, pi, models, {
+			waitForIdle: async () => {
+				await pi.emit("agent_end", {}, ctxRef);
+			},
+		});
+		ctxRef = ctx;
+		await pi.emit("session_start", {}, ctx);
+
+		const deslop = pi.commands.get("deslop");
+		assert.ok(deslop);
+		await deslop.handler("demo", ctx);
+
+		assert.deepEqual(pi.userMessages, ["TASK:demo"]);
+		assert.deepEqual(pi.currentModel, targetModel);
+		assert.equal(pi.getThinkingLevel(), "high");
+
+		await pi.emit("agent_end", {}, ctx);
+		assert.deepEqual(pi.setModelCalls, ["anthropic/target-model"]);
+		assert.deepEqual(pi.thinkingCalls, ["high"]);
+	});
+});
+
 test("prompt loop does not report completion when execution throws mid-run", async () => {
 	await withTempHome(async (root) => {
 		const cwd = join(root, "project");
