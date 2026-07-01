@@ -1167,7 +1167,12 @@ test("inline prompt restore true restores model and thinking on prompt turn agen
 		mkdirSync(join(cwd, ".pi", "prompts"), { recursive: true });
 		writeFileSync(
 			join(cwd, ".pi", "prompts", "deslop.md"),
-			"---\nmodel: anthropic/target-model\nthinking: high\nrestore: true\n---\nTASK:$@",
+			`---
+model: anthropic/target-model
+thinking: high
+restore: true
+---
+TASK:$@`,
 		);
 
 		const baseModel = { provider: "anthropic", id: "base-model" };
@@ -1214,7 +1219,12 @@ test("inline prompt restore false leaves model and thinking active after prompt 
 		mkdirSync(join(cwd, ".pi", "prompts"), { recursive: true });
 		writeFileSync(
 			join(cwd, ".pi", "prompts", "deslop.md"),
-			"---\nmodel: anthropic/target-model\nthinking: high\nrestore: false\n---\nTASK:$@",
+			`---
+model: anthropic/target-model
+thinking: high
+restore: false
+---
+TASK:$@`,
 		);
 
 		const baseModel = { provider: "anthropic", id: "base-model" };
@@ -1245,6 +1255,32 @@ test("inline prompt restore false leaves model and thinking active after prompt 
 		await pi.emit("agent_end", {}, ctx);
 		assert.deepEqual(pi.setModelCalls, ["anthropic/target-model"]);
 		assert.deepEqual(pi.thinkingCalls, ["high"]);
+	});
+});
+
+test("idle agent_end does not read context model when no restore or tool command is pending", async () => {
+	await withTempHome(async (root) => {
+		const cwd = join(root, "project");
+		mkdirSync(join(cwd, ".pi", "prompts"), { recursive: true });
+
+		const pi = new FakePi();
+		promptModelExtension(pi as never);
+		const { ctx } = createContext(cwd, pi);
+		await pi.emit("session_start", {}, ctx);
+
+		let modelReads = 0;
+		const idleCtx = Object.create(ctx, {
+			model: {
+				get() {
+					modelReads++;
+					throw new Error("idle agent_end read ctx.model");
+				},
+			},
+		});
+
+		await pi.emit("agent_end", {}, idleCtx);
+
+		assert.equal(modelReads, 0);
 	});
 });
 

@@ -1684,10 +1684,12 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 		if (chainActive) return;
 		if (loopState) return;
 
-		runtimeModel = ctx.model;
-
 		const restoreModel = previousModel;
 		const restoreThinking = previousThinking;
+		if (!restoreModel && restoreThinking === undefined && !toolManager.hasQueuedCommand()) return;
+
+		runtimeModel = ctx.model;
+
 		previousModel = undefined;
 		previousThinking = undefined;
 
