@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-07-01
+
 ### Changed
 - Updated local Pi development dependencies to `@earendil-works/*` `0.80.3` and declared Pi core packages plus `typebox` as peer dependencies for package installs.
 
