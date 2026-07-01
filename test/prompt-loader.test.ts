@@ -45,6 +45,193 @@ test("loadPromptsWithModel lets project prompts override user prompts", () => {
 	});
 });
 
+test("loadPromptsWithModel loads global settings prompt directories relative to agent dir", () => {
+	withTempHome((root) => {
+		const cwd = join(root, "project");
+		const agentDir = join(root, ".pi", "agent");
+		mkdirSync(join(agentDir, "configured-prompts"), { recursive: true });
+		writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ prompts: ["configured-prompts"] }));
+		writeFileSync(
+			join(agentDir, "configured-prompts", "global-settings.md"),
+			'---\nmodel: claude-sonnet-4-20250514\nthinking: high\n---\nglobal settings',
+		);
+
+		const result = loadPromptsWithModel(cwd);
+		const prompt = result.prompts.get("global-settings");
+		assert.equal(prompt?.source, "user");
+		assert.deepEqual(prompt?.models, ["claude-sonnet-4-20250514"]);
+		assert.equal(prompt?.thinking, "high");
+		assert.equal(prompt?.content, "global settings");
+	});
+});
+
+test("loadPromptsWithModel loads project settings prompt directories relative to project config dir", () => {
+	withTempHome((root) => {
+		const cwd = join(root, "project");
+		mkdirSync(join(cwd, ".pi", "configured-prompts"), { recursive: true });
+		writeFileSync(join(cwd, ".pi", "settings.json"), JSON.stringify({ prompts: ["configured-prompts"] }));
+		writeFileSync(
+			join(cwd, ".pi", "configured-prompts", "project-settings.md"),
+			'---\nmodel: claude-sonnet-4-20250514\nthinking: xhigh\n---\nproject settings',
+		);
+
+		const result = loadPromptsWithModel(cwd);
+		const prompt = result.prompts.get("project-settings");
+		assert.equal(prompt?.source, "project");
+		assert.equal(prompt?.thinking, "xhigh");
+		assert.equal(prompt?.content, "project settings");
+	});
+});
+
+test("loadPromptsWithModel loads single .md file entries without scanning sibling prompts", () => {
+	withTempHome((root) => {
+		const cwd = join(root, "project");
+		mkdirSync(join(cwd, ".pi", "configured-prompts"), { recursive: true });
+		writeFileSync(join(cwd, ".pi", "settings.json"), JSON.stringify({ prompts: ["configured-prompts/target.md"] }));
+		writeFileSync(join(cwd, ".pi", "configured-prompts", "target.md"), '---\nmodel: claude-sonnet-4-20250514\n---\ntarget');
+		writeFileSync(join(cwd, ".pi", "configured-prompts", "sibling.md"), '---\nmodel: claude-sonnet-4-20250514\n---\nsibling');
+
+		const result = loadPromptsWithModel(cwd);
+		assert.equal(result.prompts.get("target")?.content, "target");
+		assert.equal(result.prompts.has("sibling"), false);
+	});
+});
+
+test("loadPromptsWithModel resolves relative and tilde settings prompt paths", () => {
+	withTempHome((root) => {
+		const cwd = join(root, "project");
+		const agentDir = join(root, ".pi", "agent");
+		mkdirSync(join(agentDir, "relative-prompts"), { recursive: true });
+		mkdirSync(join(root, "tilde-prompts"), { recursive: true });
+		writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ prompts: ["relative-prompts", "~/tilde-prompts"] }));
+		writeFileSync(join(agentDir, "relative-prompts", "relative.md"), '---\nmodel: claude-sonnet-4-20250514\n---\nrelative');
+		writeFileSync(join(root, "tilde-prompts", "tilde.md"), '---\nmodel: claude-sonnet-4-20250514\n---\ntilde');
+
+		const result = loadPromptsWithModel(cwd);
+		assert.equal(result.prompts.get("relative")?.content, "relative");
+		assert.equal(result.prompts.get("tilde")?.content, "tilde");
+	});
+});
+
+test("loadPromptsWithModel gives same-scope settings prompts precedence over defaults", () => {
+	withTempHome((root) => {
+		const cwd = join(root, "project");
+		mkdirSync(join(cwd, ".pi", "configured-prompts"), { recursive: true });
+		mkdirSync(join(cwd, ".pi", "prompts"), { recursive: true });
+		writeFileSync(join(cwd, ".pi", "settings.json"), JSON.stringify({ prompts: ["configured-prompts"] }));
+		writeFileSync(join(cwd, ".pi", "configured-prompts", "same.md"), '---\nmodel: claude-sonnet-4-20250514\n---\nsettings prompt');
+		writeFileSync(join(cwd, ".pi", "prompts", "same.md"), '---\nmodel: claude-sonnet-4-20250514\n---\ndefault prompt');
+
+		const result = loadPromptsWithModel(cwd);
+		assert.equal(result.prompts.get("same")?.content, "settings prompt");
+		assert.equal(result.prompts.get("same")?.source, "project");
+		assert.match(result.diagnostics.map((diagnostic) => diagnostic.message).join("\n"), /conflicts with/);
+	});
+});
+
+test("loadPromptsWithModel dedupes default prompt files also listed in settings", () => {
+	withTempHome((root) => {
+		const cwd = join(root, "project");
+		mkdirSync(join(cwd, ".pi", "prompts"), { recursive: true });
+		writeFileSync(join(cwd, ".pi", "settings.json"), JSON.stringify({ prompts: ["prompts", "prompts/same.md"] }));
+		writeFileSync(join(cwd, ".pi", "prompts", "same.md"), '---\nmodel: claude-sonnet-4-20250514\n---\nsame file');
+
+		const result = loadPromptsWithModel(cwd);
+		assert.equal(result.prompts.get("same")?.content, "same file");
+		assert.equal(result.diagnostics.some((diagnostic) => diagnostic.code === "duplicate-command-name"), false);
+	});
+});
+
+test("loadPromptsWithModel applies settings include patterns to configured prompt directories", () => {
+	withTempHome((root) => {
+		const cwd = join(root, "project");
+		mkdirSync(join(cwd, ".pi", "configured-prompts"), { recursive: true });
+		writeFileSync(join(cwd, ".pi", "settings.json"), JSON.stringify({ prompts: ["configured-prompts", "keep*.md"] }));
+		writeFileSync(join(cwd, ".pi", "configured-prompts", "keep-this.md"), '---\nmodel: claude-sonnet-4-20250514\n---\nkeep');
+		writeFileSync(join(cwd, ".pi", "configured-prompts", "skip-this.md"), '---\nmodel: claude-sonnet-4-20250514\n---\nskip');
+
+		const result = loadPromptsWithModel(cwd);
+		assert.equal(result.prompts.get("keep-this")?.content, "keep");
+		assert.equal(result.prompts.has("skip-this"), false);
+	});
+});
+
+test("loadPromptsWithModel uses Pi-style glob semantics for settings include patterns", () => {
+	withTempHome((root) => {
+		const cwd = join(root, "project");
+		mkdirSync(join(cwd, ".pi", "configured-prompts", "foo"), { recursive: true });
+		writeFileSync(join(cwd, ".pi", "settings.json"), JSON.stringify({ prompts: ["configured-prompts", "configured-prompts/foo*.md"] }));
+		writeFileSync(join(cwd, ".pi", "configured-prompts", "foo.md"), '---\nmodel: claude-sonnet-4-20250514\n---\nflat');
+		writeFileSync(join(cwd, ".pi", "configured-prompts", "foo", "bar.md"), '---\nmodel: claude-sonnet-4-20250514\n---\nnested');
+
+		const result = loadPromptsWithModel(cwd);
+		assert.equal(result.prompts.get("foo")?.content, "flat");
+		assert.equal(result.prompts.has("bar"), false);
+	});
+});
+
+test("loadPromptsWithModel treats ** patterns like Pi when matching base-level prompt files", () => {
+	withTempHome((root) => {
+		const cwd = join(root, "project");
+		mkdirSync(join(cwd, ".pi"), { recursive: true });
+		writeFileSync(join(cwd, ".pi", "settings.json"), JSON.stringify({ prompts: [".", "**/*.md"] }));
+		writeFileSync(join(cwd, ".pi", "root.md"), '---\nmodel: claude-sonnet-4-20250514\n---\nroot');
+
+		const result = loadPromptsWithModel(cwd);
+		assert.equal(result.prompts.get("root")?.content, "root");
+	});
+});
+
+test("loadPromptsWithModel applies settings exclusions to configured and default prompts", () => {
+	withTempHome((root) => {
+		const cwd = join(root, "project");
+		mkdirSync(join(cwd, ".pi", "configured-prompts"), { recursive: true });
+		mkdirSync(join(cwd, ".pi", "prompts"), { recursive: true });
+		writeFileSync(join(cwd, ".pi", "settings.json"), JSON.stringify({ prompts: ["configured-prompts", "!draft.md"] }));
+		writeFileSync(join(cwd, ".pi", "configured-prompts", "draft.md"), '---\nmodel: claude-sonnet-4-20250514\n---\nconfigured draft');
+		writeFileSync(join(cwd, ".pi", "configured-prompts", "keep.md"), '---\nmodel: claude-sonnet-4-20250514\n---\nconfigured keep');
+		writeFileSync(join(cwd, ".pi", "prompts", "draft.md"), '---\nmodel: claude-sonnet-4-20250514\n---\ndefault draft');
+		writeFileSync(join(cwd, ".pi", "prompts", "default-keep.md"), '---\nmodel: claude-sonnet-4-20250514\n---\ndefault keep');
+
+		const result = loadPromptsWithModel(cwd);
+		assert.equal(result.prompts.has("draft"), false);
+		assert.equal(result.prompts.get("keep")?.content, "configured keep");
+		assert.equal(result.prompts.get("default-keep")?.content, "default keep");
+	});
+});
+
+test("loadPromptsWithModel reports malformed settings JSON and invalid prompt path entries", () => {
+	withTempHome((root) => {
+		const cwd = join(root, "project");
+		const agentDir = join(root, ".pi", "agent");
+		mkdirSync(agentDir, { recursive: true });
+		mkdirSync(join(cwd, ".pi"), { recursive: true });
+		writeFileSync(join(agentDir, "settings.json"), "{");
+		writeFileSync(join(cwd, ".pi", "settings.json"), JSON.stringify({ prompts: [42, "", "missing-prompts", "notes.txt"] }));
+		writeFileSync(join(cwd, ".pi", "notes.txt"), "not markdown");
+
+		const result = loadPromptsWithModel(cwd);
+		const messages = result.diagnostics.map((item) => item.message).join("\n");
+		assert.match(messages, /Skipping prompt settings .*settings\.json/i);
+		assert.match(messages, /prompts\[0\].*non-empty string/i);
+		assert.match(messages, /prompts\[1\].*non-empty string/i);
+		assert.match(messages, /resolved path .*missing-prompts.*does not exist/i);
+		assert.match(messages, /expected a directory or \.md file/i);
+	});
+});
+
+test("loadPromptsWithModel reports non-array prompts settings", () => {
+	withTempHome((root) => {
+		const cwd = join(root, "project");
+		const agentDir = join(root, ".pi", "agent");
+		mkdirSync(agentDir, { recursive: true });
+		writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ prompts: "not an array" }));
+
+		const result = loadPromptsWithModel(cwd);
+		assert.match(result.diagnostics.map((item) => item.message).join("\n"), /expected "prompts" to be an array of strings/i);
+	});
+});
+
 test("loadPromptsWithModel skips reserved command names and surfaces diagnostics", () => {
 	withTempHome((root) => {
 		const cwd = join(root, "project");
