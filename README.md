@@ -72,7 +72,7 @@ All fields are optional. Templates that don't use any extension features (no `mo
 |-------|---------|--------------|
 | `model` | current session model | Which model to use. Accepts a single model, a `provider/model-id` pair, or a comma-separated fallback list (see [Model Format](#model-format)). Ignored when `chain` is set. |
 | `skill` | — | Injects a skill's content as a context message before the agent handles your task. No extra round-trip — the agent gets the expertise immediately. See [Skill Resolution](#skill-resolution). |
-| `thinking` | — | Thinking level for the model: `off`, `minimal`, `low`, `medium`, `high`, or `xhigh`. |
+| `thinking` | — | Thinking level for the model: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. `max` requires Pi 0.80.6 or newer and a model that exposes that level. |
 | `description` | — | Short text shown next to the command in autocomplete. |
 | `chain` | — | Declares a reusable pipeline of templates (`step -> step`). When set, the body is ignored. See [Chain Templates](#chain-templates). |
 | `chainContext` | — | Chain templates only. Set to `summary` so delegated steps receive a compact summary of what previous steps did. Steps with `inheritContext: true` are excluded. See [Chain context for delegated steps](#chain-context-for-delegated-steps). |
@@ -775,7 +775,7 @@ The model switches, skill is injected, the agent responds, and output goes to st
 ---
 description: Deep code analysis with extended thinking
 model: claude-sonnet-4-20250514
-thinking: high
+thinking: max
 ---
 Analyze this code thoroughly, considering edge cases and potential issues: $@
 ```

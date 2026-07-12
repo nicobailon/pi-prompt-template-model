@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- Prompt templates now accept Pi 0.80.6+'s `max` thinking level, including comma-separated model rotations, when the selected model exposes that level.
+
 ## [0.10.0] - 2026-07-01
 
 ### Changed

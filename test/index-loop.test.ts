@@ -425,13 +425,13 @@ test("loop rotation cycles models across iterations", async () => {
 	});
 });
 
-test("loop rotation cycles comma-separated thinking levels across iterations", async () => {
+test("loop rotation cycles comma-separated thinking levels including max across iterations", async () => {
 	await withTempHome(async (root) => {
 		const cwd = join(root, "project");
 		mkdirSync(join(cwd, ".pi", "prompts"), { recursive: true });
 		writeFileSync(
 			join(cwd, ".pi", "prompts", "rotate-thinking.md"),
-			"---\nmodel: anthropic/rotate-one, anthropic/rotate-two, anthropic/rotate-three\nthinking: high, xhigh, off\nloop: 6\nconverge: false\nrotate: true\nrestore: false\n---\nROTATE",
+			"---\nmodel: anthropic/rotate-one, anthropic/rotate-two, anthropic/rotate-three\nthinking: high, xhigh, max\nloop: 6\nconverge: false\nrotate: true\nrestore: false\n---\nROTATE",
 		);
 
 		const baseModel = { provider: "anthropic", id: "base-model" };
@@ -450,7 +450,7 @@ test("loop rotation cycles comma-separated thinking levels across iterations", a
 		assert.ok(rotateThinking);
 		await rotateThinking.handler("", ctx);
 
-		assert.deepEqual(pi.thinkingCalls, ["high", "xhigh", "off", "high", "xhigh", "off"]);
+		assert.deepEqual(pi.thinkingCalls, ["high", "xhigh", "max", "high", "xhigh", "max"]);
 	});
 });
 
@@ -1213,7 +1213,7 @@ TASK:$@`,
 	});
 });
 
-test("inline prompt restore false leaves model and thinking active after prompt turn agent_end", async () => {
+test("inline prompt restore false leaves model and max thinking active after prompt turn agent_end", async () => {
 	await withTempHome(async (root) => {
 		const cwd = join(root, "project");
 		mkdirSync(join(cwd, ".pi", "prompts"), { recursive: true });
@@ -1221,7 +1221,7 @@ test("inline prompt restore false leaves model and thinking active after prompt 
 			join(cwd, ".pi", "prompts", "deslop.md"),
 			`---
 model: anthropic/target-model
-thinking: high
+thinking: max
 restore: false
 ---
 TASK:$@`,
@@ -1250,11 +1250,11 @@ TASK:$@`,
 
 		assert.deepEqual(pi.userMessages, ["TASK:demo"]);
 		assert.deepEqual(pi.currentModel, targetModel);
-		assert.equal(pi.getThinkingLevel(), "high");
+		assert.equal(pi.getThinkingLevel(), "max");
 
 		await pi.emit("agent_end", {}, ctx);
 		assert.deepEqual(pi.setModelCalls, ["anthropic/target-model"]);
-		assert.deepEqual(pi.thinkingCalls, ["high"]);
+		assert.deepEqual(pi.thinkingCalls, ["max"]);
 	});
 });
 

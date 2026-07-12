@@ -261,6 +261,21 @@ test("loadPromptsWithModel uses canonical frontmatter parsing for booleans and w
 	});
 });
 
+test("loadPromptsWithModel accepts max thinking without diagnostics", () => {
+	withTempHome((root) => {
+		const cwd = join(root, "project");
+		mkdirSync(join(cwd, ".pi", "prompts"), { recursive: true });
+		writeFileSync(
+			join(cwd, ".pi", "prompts", "max-thinking.md"),
+			"---\nmodel: claude-sonnet-4-20250514\nthinking: max\n---\nbody",
+		);
+
+		const result = loadPromptsWithModel(cwd);
+		assert.equal(result.prompts.get("max-thinking")?.thinking, "max");
+		assert.doesNotMatch(result.diagnostics.map((item) => item.message).join("\n"), /invalid thinking level/i);
+	});
+});
+
 test("loadPromptsWithModel trims optional string frontmatter fields", () => {
 	withTempHome((root) => {
 		const cwd = join(root, "project");
@@ -556,14 +571,15 @@ test("loadPromptsWithModel stores comma-separated thinking levels when rotate mo
 		mkdirSync(join(cwd, ".pi", "prompts"), { recursive: true });
 		writeFileSync(
 			join(cwd, ".pi", "prompts", "rotate-thinking.md"),
-			"---\nmodel: claude-sonnet-4-20250514, claude-opus-4-5, claude-haiku-4-5\nrotate: true\nthinking: high, xhigh, off\n---\nbody",
+			"---\nmodel: claude-sonnet-4-20250514, claude-opus-4-5, claude-haiku-4-5\nrotate: true\nthinking: high, xhigh, max\n---\nbody",
 		);
 
 		const result = loadPromptsWithModel(cwd);
 		const prompt = result.prompts.get("rotate-thinking");
 		assert.ok(prompt);
-		assert.deepEqual(prompt.thinkingLevels, ["high", "xhigh", "off"]);
+		assert.deepEqual(prompt.thinkingLevels, ["high", "xhigh", "max"]);
 		assert.equal(prompt.thinking, undefined);
+		assert.doesNotMatch(result.diagnostics.map((item) => item.message).join("\n"), /invalid thinking level/i);
 	});
 });
 
