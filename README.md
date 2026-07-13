@@ -26,7 +26,7 @@ pi install npm:pi-prompt-template-model
 
 Restart pi to load the extension.
 
-For delegated subagent execution (`subagent` and `inheritContext` frontmatter), install [pi-subagents](https://github.com/CAAIRocks/pi-subagents/) separately:
+For delegated subagent execution (`subagent` and `inheritContext` frontmatter), install [pi-subagents](https://github.com/nicobailon/pi-subagents/) separately:
 
 ```bash
 pi install npm:pi-subagents
@@ -93,7 +93,7 @@ All fields are optional. Templates that don't use any extension features (no `mo
 
 | Field | Default | What it does |
 |-------|---------|--------------|
-| `subagent` | — | Delegate execution to a subagent instead of running in the current session. `true` uses the default `delegate` agent; a string value like `reviewer` targets that specific agent. Requires [pi-subagents](https://github.com/CAAIRocks/pi-subagents/). |
+| `subagent` | — | Delegate execution to a subagent instead of running in the current session. `true` uses the default `delegate` agent; a string value like `reviewer` targets that specific agent. Requires [pi-subagents](https://github.com/nicobailon/pi-subagents/). |
 | `inheritContext` | `false` | Only meaningful with `subagent`. When `true`, the delegated request includes a bounded inherited-context seed from the active session. Fresh delegated runs receive no seed. |
 | `parallel` | — | Delegated prompts only. Repeats the same subagent in parallel `N` times. Each copy gets a slot header like `[Parallel subagent 2/3]` prepended to the task. Must be an integer greater than or equal to 2. |
 | `bestOfN` | — | Compare templates only. Nested compare authoring block with `workers`, `reviewers`, optional `finalApplier`, and optional `worktree`. Top-level compare fields are not supported in templates. |
@@ -549,7 +549,7 @@ Review and fix issues in this codebase.
 
 Iteration 1 runs Opus + `high`, iteration 2 runs GPT-5.4 + `xhigh`, iteration 3 runs Codex + `off`, then wraps back to Opus. The status bar shows which model is active: `loop 2/9 · gpt-5.4 xhigh`.
 
-This is especially useful for [ralph-style loops](https://ghuntley.com/ralph/) where different models catch different things. The `subagent` examples below require [pi-subagents](https://github.com/CAAIRocks/pi-subagents/). A single-model ralph loop that delegates with fresh context each iteration:
+This is especially useful for [ralph-style loops](https://ghuntley.com/ralph/) where different models catch different things. The `subagent` examples below require [pi-subagents](https://github.com/nicobailon/pi-subagents/). A single-model ralph loop that delegates with fresh context each iteration:
 
 ```markdown
 ---
@@ -808,5 +808,5 @@ $@
 - Prompt files are reloaded on session start and whenever an extension-owned command runs. If you add a new prompt file mid-session, run any extension command (like `/chain-prompts`), start a new session, or reload pi to pick it up.
 - Model restore state is in-memory. Closing pi mid-response loses it.
 - In chains, model-less steps inherit the chain-start model snapshot, not the previous step's model. This is intentional for deterministic behavior.
-- Delegated `subagent` prompts require [pi-subagents](https://github.com/CAAIRocks/pi-subagents/).
+- Delegated `subagent` prompts require [pi-subagents](https://github.com/nicobailon/pi-subagents/).
 - `run-prompt` must be explicitly enabled with `/prompt-tool on`.
