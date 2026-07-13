@@ -369,6 +369,121 @@ test("executeSubagentPromptStep adds bounded inherited context seed only for for
 	});
 });
 
+test("executeSubagentPromptStep neutralizes credential-shaped context seed blocks and unsafe tool names", async () => {
+	await withDelegationBridge(async (root) => {
+		const pi = createPi();
+		const ctx = createCtx(root);
+		ctx.sessionManager.getBranch = () => [
+			{
+				type: "message",
+				id: "a1",
+				timestamp: "2026-01-01T00:00:00.000Z",
+				message: {
+					role: "assistant",
+					content: [
+						{ type: "text", text: "I will inspect." },
+						{
+							type: "metadata",
+							token: "TOKEN_VALUE",
+							apiKey: "API_KEY_VALUE",
+							authorization: "Bearer AUTH_VALUE",
+							headers: { Authorization: "HEADER_AUTH_VALUE", "x-api-key": "HEADER_API_KEY_VALUE" },
+							url: "https://example.invalid/secret",
+							nested: {
+								request: {
+									url: "https://nested.invalid/secret",
+									headers: { authorization: "NESTED_AUTH_VALUE" },
+									payload: { token: "NESTED_TOKEN_VALUE" },
+								},
+							},
+						},
+						{
+							type: "toolCall",
+							id: "tool-call-id-should-not-appear",
+							name: "bash\nsecret=NAME_SECRET",
+							arguments: { command: "curl https://argument.invalid/secret", path: "/tmp/secret", value: "ARG_VALUE", token: "ARG_TOKEN" },
+						},
+						{
+							type: "tool_use",
+							id: "safe-tool-id-should-not-appear",
+							name: "read",
+							input: { url: "https://input.invalid/secret", headers: { authorization: "INPUT_AUTH_VALUE" } },
+						},
+						{
+							type: "tool_call",
+							name: "token-exfil",
+							args: { value: "TOKEN_NAME_PAYLOAD" },
+						},
+						{
+							functionCall: {
+								name: "fetch?token=NAME_QUERY_VALUE",
+								arguments: { url: "https://function.invalid/secret", apiKey: "FUNCTION_API_KEY_VALUE" },
+							},
+						},
+					],
+				},
+			},
+			{
+				type: "message",
+				id: "u2",
+				timestamp: "2026-01-01T00:00:01.000Z",
+				message: { role: "user", content: "Continue." },
+			},
+		] as any;
+		let request: any;
+
+		pi.events.on(PROMPT_TEMPLATE_SUBAGENT_REQUEST_EVENT, (data) => {
+			request = data;
+			pi.events.emit(PROMPT_TEMPLATE_SUBAGENT_STARTED_EVENT, { requestId: request.requestId });
+			pi.events.emit(PROMPT_TEMPLATE_SUBAGENT_RESPONSE_EVENT, {
+				...request,
+				messages: [{ role: "assistant", content: [{ type: "text", text: "Done." }] }],
+				isError: false,
+			});
+		});
+
+		await executeSubagentPromptStep({
+			pi,
+			prompt: { ...prompt, inheritContext: true },
+			args: [],
+			ctx,
+			currentModel: ctx.model,
+		});
+
+		assert.equal(request.contextSeed.messages[0].content, "I will inspect.\n[tool call: tool]\n[tool call: tool]\n[tool call: read]\n[tool call: tool]\n[tool call: tool]");
+		const serializedSeed = JSON.stringify(request.contextSeed);
+		for (const omitted of [
+			"TOKEN_VALUE",
+			"API_KEY_VALUE",
+			"AUTH_VALUE",
+			"HEADER_AUTH_VALUE",
+			"HEADER_API_KEY_VALUE",
+			"https://example.invalid/secret",
+			"https://nested.invalid/secret",
+			"NESTED_AUTH_VALUE",
+			"NESTED_TOKEN_VALUE",
+			"tool-call-id-should-not-appear",
+			"safe-tool-id-should-not-appear",
+			"NAME_SECRET",
+			"ARG_VALUE",
+			"ARG_TOKEN",
+			"https://argument.invalid/secret",
+			"https://input.invalid/secret",
+			"INPUT_AUTH_VALUE",
+			"token-exfil",
+			"TOKEN_NAME_PAYLOAD",
+			"NAME_QUERY_VALUE",
+			"https://function.invalid/secret",
+			"FUNCTION_API_KEY_VALUE",
+		]) {
+			assert.equal(serializedSeed.includes(omitted), false, `${omitted} should be omitted from inherited context seed`);
+		}
+		for (const omittedKey of ["token", "apiKey", "authorization", "headers", "url", "arguments", "input", "id"]) {
+			assert.equal(request.contextSeed.messages[0].content.includes(omittedKey), false, `${omittedKey} key should not enter inherited context seed content`);
+		}
+	});
+});
+
 test("executeSubagentPromptStep fails on delegated error response", async () => {
 	await withDelegationBridge(async (root) => {
 		const pi = createPi();

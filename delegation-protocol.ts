@@ -46,18 +46,78 @@ function stringifyUnknown(value: unknown): string {
 
 const TOOL_CALL_BLOCK_TYPES = new Set(["toolCall", "tool_call", "toolUse", "tool_use", "function", "functionCall", "function_call"]);
 const TOOL_CALL_CONTAINER_KEYS = ["toolCall", "tool_call", "toolUse", "tool_use", "functionCall", "function_call"];
-const TOOL_ARGUMENT_KEYS = new Set(["arguments", "args", "input", "command", "path", "value", "secret"]);
+const TOOL_PAYLOAD_KEYS = new Set([
+	"accesskey",
+	"apikey",
+	"args",
+	"arguments",
+	"auth",
+	"authorization",
+	"body",
+	"cmd",
+	"command",
+	"cookie",
+	"cookies",
+	"credential",
+	"credentials",
+	"endpoint",
+	"filepath",
+	"header",
+	"headers",
+	"id",
+	"input",
+	"params",
+	"passphrase",
+	"passwd",
+	"password",
+	"path",
+	"payload",
+	"privatekey",
+	"query",
+	"secret",
+	"secrets",
+	"token",
+	"tokens",
+	"toolcallid",
+	"uri",
+	"url",
+	"value",
+	"values",
+]);
+const UNSAFE_TOOL_NAME_PATTERN = /[^A-Za-z0-9_.:-]/;
+const MAX_TOOL_NAME_CHARS = 64;
+const CREDENTIAL_TOOL_NAME_FRAGMENTS = ["apikey", "authorization", "credential", "credentials", "password", "passwd", "privatekey", "secret", "token"];
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
 	return value && typeof value === "object" ? value as Record<string, unknown> : undefined;
 }
 
-function hasToolArgumentPayload(record: Record<string, unknown>): boolean {
-	for (const key of TOOL_ARGUMENT_KEYS) {
-		if (Object.hasOwn(record, key)) return true;
+function normalizePayloadKey(key: string): string {
+	return key.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function isPayloadKey(key: string): boolean {
+	const normalized = normalizePayloadKey(key);
+	return TOOL_PAYLOAD_KEYS.has(normalized)
+		|| normalized.endsWith("apikey")
+		|| normalized.endsWith("authorization")
+		|| normalized.endsWith("credential")
+		|| normalized.endsWith("credentials")
+		|| normalized.endsWith("secret")
+		|| normalized.endsWith("token")
+		|| normalized.endsWith("password");
+}
+
+function hasToolArgumentPayload(value: unknown, seen = new Set<object>()): boolean {
+	if (Array.isArray(value)) return value.some((child) => hasToolArgumentPayload(child, seen));
+	const record = asRecord(value);
+	if (!record) return false;
+	if (seen.has(record)) return false;
+	seen.add(record);
+	for (const [key, child] of Object.entries(record)) {
+		if (isPayloadKey(key) || hasToolArgumentPayload(child, seen)) return true;
 	}
-	const functionRecord = asRecord(record.function);
-	return !!functionRecord && hasToolArgumentPayload(functionRecord);
+	return false;
 }
 
 function isToolCallBlock(record: Record<string, unknown>): boolean {
@@ -69,30 +129,47 @@ function isToolCallBlock(record: Record<string, unknown>): boolean {
 	return hasToolArgumentPayload(record);
 }
 
+function sanitizeToolName(name: unknown): string {
+	if (typeof name !== "string") return "tool";
+	const trimmed = name.trim();
+	const normalized = normalizePayloadKey(trimmed);
+	if (
+		!trimmed
+		|| trimmed.length > MAX_TOOL_NAME_CHARS
+		|| UNSAFE_TOOL_NAME_PATTERN.test(trimmed)
+		|| CREDENTIAL_TOOL_NAME_FRAGMENTS.some((fragment) => normalized.includes(fragment))
+	) {
+		return "tool";
+	}
+	return trimmed;
+}
+
 function getToolCallName(record: Record<string, unknown>): string {
 	const functionRecord = asRecord(record.function);
 	for (const key of TOOL_CALL_CONTAINER_KEYS) {
 		const nestedRecord = asRecord(record[key]);
 		if (nestedRecord) return getToolCallName(nestedRecord);
 	}
-	return typeof record.name === "string"
-		? record.name
-		: typeof record.toolName === "string"
-			? record.toolName
-			: typeof record.functionName === "string"
-				? record.functionName
-				: typeof functionRecord?.name === "string"
-					? functionRecord.name
-					: "tool";
+	return sanitizeToolName(
+		typeof record.name === "string"
+			? record.name
+			: typeof record.toolName === "string"
+				? record.toolName
+				: typeof record.functionName === "string"
+					? record.functionName
+					: functionRecord?.name,
+	);
 }
 
-function omitToolArgumentPayloads(value: unknown): unknown {
-	if (Array.isArray(value)) return value.map(omitToolArgumentPayloads);
+function omitToolArgumentPayloads(value: unknown, seen = new Set<object>()): unknown {
+	if (Array.isArray(value)) return value.map((child) => omitToolArgumentPayloads(child, seen));
 	const record = asRecord(value);
 	if (!record) return value;
+	if (seen.has(record)) return "[omitted]";
+	seen.add(record);
 	const sanitized: Record<string, unknown> = {};
 	for (const [key, child] of Object.entries(record)) {
-		sanitized[key] = TOOL_ARGUMENT_KEYS.has(key) ? "[omitted]" : omitToolArgumentPayloads(child);
+		sanitized[key] = isPayloadKey(key) ? "[omitted]" : omitToolArgumentPayloads(child, seen);
 	}
 	return sanitized;
 }
