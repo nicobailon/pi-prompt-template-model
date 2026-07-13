@@ -7,12 +7,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/nicobailon/pi-prompt-template-model.git"
+    "url": "git+https://github.com/CAAIRocks/pi-prompt-template-model.git"
   },
   "bugs": {
-    "url": "https://github.com/nicobailon/pi-prompt-template-model/issues"
+    "url": "https://github.com/CAAIRocks/pi-prompt-template-model/issues"
   },
-  "homepage": "https://github.com/nicobailon/pi-prompt-template-model#readme",
+  "homepage": "https://github.com/CAAIRocks/pi-prompt-template-model#readme",
   "keywords": [
     "pi-package",
     "pi",
@@ -32,6 +32,7 @@
     "prompt-loader.ts",
     "deterministic-step.ts",
     "deterministic-renderer.ts",
+    "delegation-protocol.ts",
     "subagent-renderer.ts",
     "subagent-runtime.ts",
     "subagent-step.ts",

@@ -9,6 +9,8 @@ import type { PromptWithModel } from "./prompt-loader.ts";
 import { notify } from "./notifications.ts";
 import {
 	DEFAULT_SUBAGENT_NAME,
+	DELEGATED_SUBAGENT_PROTOCOL_CAPABILITIES,
+	DELEGATED_SUBAGENT_PROTOCOL_VERSION,
 	appendDelegatedLiveOutput,
 	clearDelegatedLiveState,
 	getDelegatedLiveState,
@@ -22,12 +24,15 @@ import {
 	type DelegatedSubagentParallelResult,
 	type DelegatedSubagentRequest,
 	type DelegatedSubagentResponse,
+	type DelegatedSubagentSkill,
 	type DelegatedSubagentTask,
 	type DelegatedSubagentTaskProgress,
 	type DelegatedSubagentUpdate,
 } from "./subagent-runtime.ts";
 import type { SubagentOverride } from "./args.ts";
 import { createDelegatedProgressWidget, DELEGATED_WIDGET_KEY } from "./subagent-widget.ts";
+import { buildDelegatedContextSeed, buildDelegatedFallbackModels, formatDelegatedModelRef } from "./delegation-protocol.ts";
+import { readSkillContent, resolveSkillPath } from "./prompt-loader.ts";
 
 interface DelegatedPromptBaseOptions {
 	pi: ExtensionAPI;
@@ -157,10 +162,58 @@ interface PreparedDelegatedTask {
 	task: string;
 	context: "fresh" | "fork";
 	model: string;
+	fallbackModels?: string[];
+	thinking?: string;
+	skills?: DelegatedSubagentSkill[];
 	cwd: string;
 }
 
+function normalizeSkillName(skillName: string): string {
+	return skillName.startsWith("skill:") ? skillName.slice("skill:".length) : skillName;
+}
+
+function isPathResolvableSkillName(skillName: string): boolean {
+	if (skillName === "." || skillName === "..") return false;
+	if (skillName.includes("/") || skillName.includes("\\")) return false;
+	return true;
+}
+
+function resolveRegisteredSkillPath(pi: ExtensionAPI, skillName: string): string | undefined {
+	const normalizedSkillName = normalizeSkillName(skillName);
+	if (!normalizedSkillName) return undefined;
+	if (typeof pi.getCommands !== "function") return undefined;
+	const candidates = new Set([normalizedSkillName, `skill:${normalizedSkillName}`]);
+	for (const command of pi.getCommands()) {
+		if (command.source !== "skill") continue;
+		const sourceInfo = "sourceInfo" in command
+			? (command as { sourceInfo?: { path?: string } }).sourceInfo
+			: undefined;
+		if (sourceInfo?.path && candidates.has(command.name)) return sourceInfo.path;
+	}
+	return undefined;
+}
+
+function resolveDelegatedSkills(pi: ExtensionAPI, skillNames: string[] | undefined, cwd: string): DelegatedSubagentSkill[] | undefined {
+	if (!skillNames || skillNames.length === 0) return undefined;
+	const resolved: DelegatedSubagentSkill[] = [];
+	const seen = new Set<string>();
+	for (const rawSkillName of skillNames) {
+		const name = normalizeSkillName(rawSkillName).trim();
+		if (!name || seen.has(name)) continue;
+		seen.add(name);
+		const path = resolveRegisteredSkillPath(pi, rawSkillName) ?? (isPathResolvableSkillName(name) ? resolveSkillPath(name, cwd) : undefined);
+		if (!path) throw new Error(`Skill "${rawSkillName}" not found`);
+		try {
+			resolved.push({ name, content: readSkillContent(path), path });
+		} catch (error) {
+			throw new Error(`Failed to read skill "${rawSkillName}": ${error instanceof Error ? error.message : String(error)}`);
+		}
+	}
+	return resolved.length > 0 ? resolved : undefined;
+}
+
 async function prepareDelegatedTask(
+	pi: ExtensionAPI,
 	task: DelegatedParallelTaskInput,
 	ctx: ExtensionContext,
 	currentModel: Model<any> | undefined,
@@ -201,12 +254,16 @@ async function prepareDelegatedTask(
 		taskText = `${task.taskPrefix}\n\n${taskText}`;
 	}
 
+	const model = formatDelegatedModelRef(prepared.selectedModel.model);
 	return {
 		promptName: task.prompt.name,
 		agent,
 		task: taskText,
 		context: task.prompt.inheritContext ? "fork" : "fresh",
-		model: `${prepared.selectedModel.model.provider}/${prepared.selectedModel.model.id}`,
+		model,
+		fallbackModels: buildDelegatedFallbackModels(task.prompt.models, model),
+		thinking: task.prompt.thinking,
+		skills: resolveDelegatedSkills(pi, task.prompt.skills ?? (task.prompt.skill ? [task.prompt.skill] : undefined), effectiveCwd),
 		cwd: effectiveCwd,
 	};
 }
@@ -236,7 +293,7 @@ function hasOwn<T extends object>(value: T, key: PropertyKey): boolean {
 
 function sanitizeOutputLines(lines: string[] | undefined): string[] {
 	if (!lines || lines.length === 0) return [];
-	return lines.filter((line): line is string => typeof line === "string" && line.trim() && line.trim() !== "(running...)");
+	return lines.filter((line): line is string => typeof line === "string" && !!line.trim() && line.trim() !== "(running...)");
 }
 
 function collectNewOutputLines(previous: string[] | undefined, next: string[] | undefined): string[] {
@@ -537,14 +594,14 @@ export async function executeSubagentPromptStep(options: DelegatedPromptOptions)
 	const { pi, ctx, currentModel, override, signal, inheritedModel, taskPreamble, allowPartialFailures } = options;
 	const isParallelRequest = "parallel" in options;
 
-	const tasks = isParallelRequest
-		? options.parallel
+	const tasks: DelegatedParallelTaskInput[] = isParallelRequest
+		? (options.parallel ?? [])
 		: [{ prompt: options.prompt, args: options.args }];
 	if (tasks.length === 0) return undefined;
 
 	const preparedTasks: PreparedDelegatedTask[] = [];
 	for (const task of tasks) {
-		const preparedTask = await prepareDelegatedTask(task, ctx, currentModel, override, inheritedModel, taskPreamble);
+		const preparedTask = await prepareDelegatedTask(pi, task, ctx, currentModel, override, inheritedModel, taskPreamble);
 		preparedTasks.push(preparedTask);
 	}
 
@@ -561,6 +618,13 @@ export async function executeSubagentPromptStep(options: DelegatedPromptOptions)
 
 	const request: DelegatedSubagentRequest = {
 		requestId: randomUUID(),
+		protocolVersion: DELEGATED_SUBAGENT_PROTOCOL_VERSION,
+		compatibility: {
+			protocolVersion: DELEGATED_SUBAGENT_PROTOCOL_VERSION,
+			minProtocolVersion: 1,
+			capabilities: [...DELEGATED_SUBAGENT_PROTOCOL_CAPABILITIES],
+			optionalFields: ["fallbackModels", "thinking", "skills", "contextSeed"],
+		},
 		agent: preparedTasks[0]!.agent,
 		task: preparedTasks[0]!.task,
 		...(isParallelRequest
@@ -569,12 +633,19 @@ export async function executeSubagentPromptStep(options: DelegatedPromptOptions)
 					agent: task.agent,
 					task: task.task,
 					model: task.model,
+					...(task.fallbackModels ? { fallbackModels: task.fallbackModels } : {}),
+					...(task.thinking ? { thinking: task.thinking } : {}),
+					...(task.skills ? { skills: task.skills } : {}),
 					cwd: task.cwd,
 				})),
 			}
 			: {}),
 		context: requestContext,
 		model: preparedTasks[0]!.model,
+		...(preparedTasks[0]!.fallbackModels ? { fallbackModels: preparedTasks[0]!.fallbackModels } : {}),
+		...(preparedTasks[0]!.thinking ? { thinking: preparedTasks[0]!.thinking } : {}),
+		...(preparedTasks[0]!.skills ? { skills: preparedTasks[0]!.skills } : {}),
+		...(requestContext === "fork" ? { contextSeed: buildDelegatedContextSeed(ctx) } : {}),
 		cwd: requestCwd,
 		...(options.worktree ? { worktree: true } : {}),
 	};

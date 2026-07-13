@@ -1,3 +1,5 @@
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+
 export interface LoopExtraction {
 	args: string;
 	loopCount: number | null;
@@ -27,6 +29,9 @@ export interface SubagentOverrideExtraction {
 export interface LineupOverrideSlot {
 	agent: string;
 	model?: string;
+	thinking?: ThinkingLevel;
+	skill?: string;
+	skills?: string[];
 	task?: string;
 	taskSuffix?: string;
 	cwd?: string;
@@ -43,6 +48,27 @@ export interface LineupOverrideExtraction {
 	args: string;
 	actions: LineupOverrideAction[];
 	errors: string[];
+}
+
+const VALID_THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh"]);
+
+function parseModelThinkingSuffix(modelSpec: string): { model: string; thinking?: ThinkingLevel } {
+	const colonIndex = modelSpec.lastIndexOf(":");
+	if (colonIndex <= 0 || colonIndex === modelSpec.length - 1) return { model: modelSpec };
+	const suffix = modelSpec.slice(colonIndex + 1).toLowerCase();
+	if (!VALID_THINKING_LEVELS.has(suffix)) return { model: modelSpec };
+	return { model: modelSpec.slice(0, colonIndex), thinking: suffix as ThinkingLevel };
+}
+
+function normalizeStringList(value: unknown): string[] | undefined {
+	const entries = Array.isArray(value) ? value : value === undefined ? [] : [value];
+	const normalized: string[] = [];
+	for (const entry of entries) {
+		if (typeof entry !== "string") return undefined;
+		const trimmed = entry.trim();
+		if (trimmed) normalized.push(trimmed);
+	}
+	return normalized.length > 0 ? normalized : undefined;
 }
 
 export function extractLoopCount(argsString: string): LoopExtraction | null {
@@ -393,7 +419,23 @@ function parseLineupOverrideSlots(
 			errors.push(`Invalid ${label}: slot ${i + 1} requires "agent" or "subagent".`);
 			return undefined;
 		}
-		const model = typeof slot.model === "string" && slot.model.trim() ? slot.model.trim() : undefined;
+		const parsedModel = typeof slot.model === "string" && slot.model.trim() ? parseModelThinkingSuffix(slot.model.trim()) : undefined;
+		const model = parsedModel?.model;
+		const explicitThinking = typeof slot.thinking === "string" && slot.thinking.trim() ? (slot.thinking.trim().toLowerCase() as ThinkingLevel) : undefined;
+		if (explicitThinking !== undefined && !VALID_THINKING_LEVELS.has(explicitThinking)) {
+			errors.push(`Invalid ${label}: slot ${i + 1} has invalid "thinking".`);
+			return undefined;
+		}
+		const skills = normalizeStringList(slot.skills);
+		const skill = typeof slot.skill === "string" && slot.skill.trim() ? slot.skill.trim() : undefined;
+		if (slot.skills !== undefined && !skills) {
+			errors.push(`Invalid ${label}: slot ${i + 1} "skills" must be a non-empty string array.`);
+			return undefined;
+		}
+		if (slot.skill !== undefined && !skill) {
+			errors.push(`Invalid ${label}: slot ${i + 1} "skill" must be a non-empty string.`);
+			return undefined;
+		}
 		const task = typeof slot.task === "string" && slot.task.trim() ? slot.task.trim() : undefined;
 		const taskSuffix = typeof slot.taskSuffix === "string" && slot.taskSuffix.trim() ? slot.taskSuffix.trim() : undefined;
 		if (target === "finalApplier" && slot.cwd !== undefined) {
@@ -417,6 +459,9 @@ function parseLineupOverrideSlots(
 		slots.push({
 			agent,
 			...(model ? { model } : {}),
+			...(explicitThinking ?? parsedModel?.thinking ? { thinking: explicitThinking ?? parsedModel?.thinking } : {}),
+			...(skill ? { skill } : {}),
+			...(skills ? { skills } : {}),
 			...(task ? { task } : {}),
 			...(taskSuffix ? { taskSuffix } : {}),
 			...(cwd ? { cwd } : {}),

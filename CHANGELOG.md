@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+- Delegated prompt requests now advertise protocol v2 compatibility metadata and optional backend-neutral fields for the effective primary model, ordered fallback models, requested thinking level, resolved skills, and bounded inherited-context seeds.
+- Compare lineups now support per-slot `thinking` plus one-or-many `skill` / `skills`, including normalization of legacy `model:thinking` suffixes.
+
+### Changed
+- `inheritContext` delegated runs now include a deterministic bounded seed from the active session while fresh delegated runs send no seed. The seed excludes thinking blocks, truncates large tool results, drops unresolved trailing tool calls, and includes metadata about its limits.
+- Delegated model/thinking/skill resolution is forwarded to the bridge without mutating the parent session's active model, thinking level, or skill queue.
+
 ## [0.10.0] - 2026-07-01
 
 ### Changed

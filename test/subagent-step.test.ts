@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { executeSubagentPromptStep } from "../subagent-step.ts";
@@ -213,6 +213,121 @@ test("executeSubagentPromptStep forwards custom agents to the loaded bridge", as
 		});
 		assert.equal(requestAgent, "special");
 		assert.equal(result?.agent, "special");
+	});
+});
+
+test("executeSubagentPromptStep forwards protocol v2 metadata, fallback models, thinking, and resolved skills", async () => {
+	await withDelegationBridge(async (root) => {
+		const pi = createPi();
+		const ctx = createCtx(root);
+		mkdirSync(join(root, ".pi", "skills", "audit"), { recursive: true });
+		writeFileSync(join(root, ".pi", "skills", "audit", "SKILL.md"), "---\ntitle: Audit\n---\nAudit skill body");
+		let request: any;
+
+		pi.events.on(PROMPT_TEMPLATE_SUBAGENT_REQUEST_EVENT, (data) => {
+			request = data;
+			pi.events.emit(PROMPT_TEMPLATE_SUBAGENT_STARTED_EVENT, { requestId: request.requestId });
+			pi.events.emit(PROMPT_TEMPLATE_SUBAGENT_RESPONSE_EVENT, {
+				...request,
+				messages: [{ role: "assistant", content: [{ type: "text", text: "Done." }] }],
+				isError: false,
+			});
+		});
+
+		await executeSubagentPromptStep({
+			pi,
+			prompt: {
+				...prompt,
+				models: ["anthropic/claude-sonnet-4-20250514", "openai/gpt-5.4"],
+				thinking: "high",
+				skills: ["audit"],
+			},
+			args: [],
+			ctx,
+			currentModel: ctx.model,
+		});
+
+		assert.equal(request.protocolVersion, 2);
+		assert.deepEqual(request.compatibility.capabilities, [
+			"effective-primary-model",
+			"requested-thinking",
+			"ordered-fallback-models",
+			"resolved-skills",
+			"bounded-context-seed",
+		]);
+		assert.equal(request.model, "anthropic/claude-sonnet-4-20250514");
+		assert.deepEqual(request.fallbackModels, ["openai/gpt-5.4"]);
+		assert.equal(request.thinking, "high");
+		assert.deepEqual(request.skills, [{ name: "audit", content: "Audit skill body", path: join(root, ".pi", "skills", "audit", "SKILL.md") }]);
+		assert.equal(request.contextSeed, undefined);
+	});
+});
+
+test("executeSubagentPromptStep adds bounded inherited context seed only for fork context", async () => {
+	await withDelegationBridge(async (root) => {
+		const pi = createPi();
+		const ctx = createCtx(root);
+		ctx.sessionManager.getBranch = () => [
+			{
+				type: "message",
+				id: "u1",
+				timestamp: "2026-01-01T00:00:00.000Z",
+				message: { role: "user", content: "Please inspect this." },
+			},
+			{
+				type: "message",
+				id: "a1",
+				timestamp: "2026-01-01T00:00:01.000Z",
+				message: {
+					role: "assistant",
+					content: [
+						{ type: "thinking", thinking: "hidden chain of thought" },
+						{ type: "text", text: "I will inspect." },
+					],
+				},
+			},
+			{
+				type: "message",
+				id: "t1",
+				timestamp: "2026-01-01T00:00:02.000Z",
+				message: { role: "toolResult", toolName: "read", toolCallId: "1", content: [{ type: "text", text: "x".repeat(3000) }] },
+			},
+			{
+				type: "message",
+				id: "a2",
+				timestamp: "2026-01-01T00:00:03.000Z",
+				message: { role: "assistant", content: [{ type: "toolCall", id: "2", name: "bash", arguments: { command: "npm test" } }] },
+			},
+		] as any;
+		let request: any;
+
+		pi.events.on(PROMPT_TEMPLATE_SUBAGENT_REQUEST_EVENT, (data) => {
+			request = data;
+			pi.events.emit(PROMPT_TEMPLATE_SUBAGENT_STARTED_EVENT, { requestId: request.requestId });
+			pi.events.emit(PROMPT_TEMPLATE_SUBAGENT_RESPONSE_EVENT, {
+				...request,
+				messages: [{ role: "assistant", content: [{ type: "text", text: "Done." }] }],
+				isError: false,
+			});
+		});
+
+		await executeSubagentPromptStep({
+			pi,
+			prompt: { ...prompt, inheritContext: true },
+			args: [],
+			ctx,
+			currentModel: ctx.model,
+		});
+
+		assert.equal(request.context, "fork");
+		assert.equal(request.contextSeed.kind, "bounded-session-context");
+		assert.equal(request.contextSeed.metadata.excludesThinking, true);
+		assert.equal(request.contextSeed.metadata.excludesUnresolvedTrailingToolCalls, true);
+		assert.deepEqual(request.contextSeed.messages.map((message: any) => message.id), ["u1", "a1", "t1"]);
+		assert.equal(request.contextSeed.messages[1].content.includes("hidden chain of thought"), false);
+		assert.equal(request.contextSeed.messages[2].role, "toolResult");
+		assert.equal(request.contextSeed.messages[2].truncated, true);
+		assert.ok(request.contextSeed.messages[2].content.length <= 2000);
 	});
 });
 

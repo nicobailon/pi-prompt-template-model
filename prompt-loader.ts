@@ -36,6 +36,9 @@ export type PromptSource = "user" | "project";
 export interface DelegationLineupSlot {
 	agent: string;
 	model?: string;
+	thinking?: ThinkingLevel;
+	skill?: string;
+	skills?: string[];
 	task?: string;
 	taskSuffix?: string;
 	cwd?: string;
@@ -69,6 +72,7 @@ export interface PromptWithModel {
 	chainContext?: "summary";
 	restore: boolean;
 	skill?: string;
+	skills?: string[];
 	thinking?: ThinkingLevel;
 	thinkingLevels?: ThinkingLevel[];
 	rotate?: boolean;
@@ -148,6 +152,47 @@ function normalizeStringField(
 	return normalized.length > 0 ? normalized : undefined;
 }
 
+function normalizeStringListField(
+	field: string,
+	value: unknown,
+	filePath: string,
+	source: PromptSource,
+	diagnostics: PromptLoaderDiagnostic[],
+): string[] | undefined {
+	if (value === undefined) return undefined;
+	const values = Array.isArray(value) ? value : [value];
+	const normalized: string[] = [];
+	for (const entry of values) {
+		if (typeof entry !== "string") {
+			diagnostics.push(
+				createDiagnostic(
+					`invalid-${field}`,
+					filePath,
+					source,
+					`Ignoring invalid ${field} value in ${filePath}: expected a string or array of strings.`,
+				),
+			);
+			return undefined;
+		}
+		const trimmed = entry.trim();
+		if (trimmed) normalized.push(trimmed);
+	}
+	return normalized.length > 0 ? normalized : undefined;
+}
+
+function mergeSkillNames(...lists: Array<string[] | undefined>): string[] | undefined {
+	const merged: string[] = [];
+	const seen = new Set<string>();
+	for (const list of lists) {
+		for (const skill of list ?? []) {
+			if (seen.has(skill)) continue;
+			seen.add(skill);
+			merged.push(skill);
+		}
+	}
+	return merged.length > 0 ? merged : undefined;
+}
+
 function isValidModelSelectionSpec(spec: string): boolean {
 	if (!spec || spec.includes("*") || /\s/.test(spec)) return false;
 
@@ -158,6 +203,14 @@ function isValidModelSelectionSpec(spec: string): boolean {
 	if (modelId.length === 0) return false;
 	if (modelId.split("/").some((segment) => segment.length === 0)) return false;
 	return true;
+}
+
+function parseModelThinkingSuffix(modelSpec: string): { model: string; thinking?: ThinkingLevel } {
+	const colonIndex = modelSpec.lastIndexOf(":");
+	if (colonIndex <= 0 || colonIndex === modelSpec.length - 1) return { model: modelSpec };
+	const suffix = modelSpec.slice(colonIndex + 1).toLowerCase();
+	if (!(VALID_THINKING_LEVELS as readonly string[]).includes(suffix)) return { model: modelSpec };
+	return { model: modelSpec.slice(0, colonIndex), thinking: suffix as ThinkingLevel };
 }
 
 function normalizeFrontmatterRecord(
@@ -855,7 +908,8 @@ function normalizeLineupSlot(
 			);
 			return undefined;
 		}
-		const modelSpec = slot.model.trim();
+		const parsedModel = parseModelThinkingSuffix(slot.model.trim());
+		const modelSpec = parsedModel.model;
 		if (!isValidModelSelectionSpec(modelSpec)) {
 			diagnostics.push(
 				createDiagnostic(
@@ -868,6 +922,19 @@ function normalizeLineupSlot(
 			return undefined;
 		}
 		normalized.model = modelSpec;
+		if (parsedModel.thinking) normalized.thinking = parsedModel.thinking;
+	}
+
+	const explicitThinking = normalizeThinking(slot.thinking, filePath, source, diagnostics);
+	if (explicitThinking) normalized.thinking = explicitThinking;
+
+	const skills = mergeSkillNames(
+		normalizeStringListField("skill", slot.skill, filePath, source, diagnostics),
+		normalizeStringListField("skills", slot.skills, filePath, source, diagnostics),
+	);
+	if (skills) {
+		normalized.skill = skills[0];
+		normalized.skills = skills;
 	}
 
 	if (slot.task !== undefined) {
@@ -1854,7 +1921,13 @@ function loadPromptsWithModelFromDir(
 				const safeInheritContext = subagent !== undefined && inheritContext;
 				const safeCwd = (chain || subagent !== undefined || hasLineup) ? cwd : undefined;
 				const description = normalizeStringField("description", frontmatter.description, fullPath, source, diagnostics) ?? "";
-				const skill = chain ? undefined : normalizeStringField("skill", frontmatter.skill, fullPath, source, diagnostics);
+				const skills = chain
+					? undefined
+					: mergeSkillNames(
+						normalizeStringListField("skill", frontmatter.skill, fullPath, source, diagnostics),
+						normalizeStringListField("skills", frontmatter.skills, fullPath, source, diagnostics),
+					);
+				const skill = skills?.[0];
 				let thinking: ThinkingLevel | undefined;
 				let thinkingLevels: ThinkingLevel[] | undefined;
 				if (!chain) {
@@ -1953,6 +2026,7 @@ function loadPromptsWithModelFromDir(
 					chainContext,
 					restore,
 					skill,
+					skills,
 					thinking,
 					thinkingLevels,
 					rotate: rotate || undefined,

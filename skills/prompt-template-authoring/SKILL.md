@@ -105,7 +105,7 @@ parallel: 3                 # run 3 copies in parallel (optional)
 $@
 ```
 
-Requires [pi-subagents](https://github.com/nicobailon/pi-subagents/) to be installed.
+Requires [pi-subagents](https://github.com/CAAIRocks/pi-subagents/) to be installed.
 
 ## Loops
 

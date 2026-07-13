@@ -6,10 +6,64 @@ export const PROMPT_TEMPLATE_SUBAGENT_CANCEL_EVENT = "prompt-template:subagent:c
 export const PROMPT_TEMPLATE_SUBAGENT_MESSAGE_TYPE = "prompt-template-subagent";
 export const DEFAULT_SUBAGENT_NAME = "delegate";
 
+export const DELEGATED_SUBAGENT_PROTOCOL_VERSION = 2;
+
+export const DELEGATED_SUBAGENT_PROTOCOL_CAPABILITIES = [
+	"effective-primary-model",
+	"requested-thinking",
+	"ordered-fallback-models",
+	"resolved-skills",
+	"bounded-context-seed",
+] as const;
+
+export interface DelegatedSubagentCompatibility {
+	protocolVersion: typeof DELEGATED_SUBAGENT_PROTOCOL_VERSION;
+	minProtocolVersion: 1;
+	capabilities: Array<(typeof DELEGATED_SUBAGENT_PROTOCOL_CAPABILITIES)[number]>;
+	optionalFields: string[];
+}
+
+export interface DelegatedSubagentSkill {
+	name: string;
+	content: string;
+	path?: string;
+}
+
+export interface DelegatedSubagentContextSeedMessage {
+	role: "user" | "assistant" | "system" | "toolResult" | "custom";
+	content: string;
+	source?: string;
+	id?: string;
+	timestamp?: string;
+	truncated?: boolean;
+}
+
+export interface DelegatedSubagentContextSeedMetadata {
+	source: "active-session";
+	maxToolResultChars: number;
+	excludesThinking: true;
+	excludesUnresolvedTrailingToolCalls: true;
+}
+
+export interface DelegatedSubagentContextSeed {
+	kind: "bounded-session-context";
+	metadata: DelegatedSubagentContextSeedMetadata;
+	messages: DelegatedSubagentContextSeedMessage[];
+	includedMessages: number;
+	omittedMessages: number;
+	maxMessages: number;
+	maxChars: number;
+	usedChars: number;
+	truncated: boolean;
+}
+
 export interface DelegatedSubagentTask {
 	agent: string;
 	task: string;
 	model?: string;
+	fallbackModels?: string[];
+	thinking?: string;
+	skills?: DelegatedSubagentSkill[];
 	cwd?: string;
 }
 
@@ -22,11 +76,17 @@ export interface DelegatedSubagentParallelResult {
 
 export interface DelegatedSubagentRequest {
 	requestId: string;
+	protocolVersion?: number;
+	compatibility?: DelegatedSubagentCompatibility;
 	agent: string;
 	task: string;
 	tasks?: DelegatedSubagentTask[];
 	context: "fresh" | "fork";
 	model: string;
+	fallbackModels?: string[];
+	thinking?: string;
+	skills?: DelegatedSubagentSkill[];
+	contextSeed?: DelegatedSubagentContextSeed;
 	cwd: string;
 	worktree?: boolean;
 }

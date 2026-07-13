@@ -1180,23 +1180,24 @@ test("loadPromptsWithModel parses the shipped best-of-n example", () => {
 		assert.equal(prompt.worktree, true);
 		assert.equal(prompt.workers?.length, 2);
 		assert.deepEqual(
-			prompt.workers?.map((slot) => ({ agent: slot.agent, model: slot.model, count: slot.count, taskSuffix: slot.taskSuffix })),
+			prompt.workers?.map((slot) => ({ agent: slot.agent, model: slot.model, thinking: slot.thinking, count: slot.count, taskSuffix: slot.taskSuffix })),
 			[
-				{ agent: "delegate", model: "openai-codex/gpt-5.3-codex-spark:low", count: 3, taskSuffix: undefined },
-				{ agent: "delegate", model: "openai-codex/gpt-5.4-mini:high", count: 2, taskSuffix: undefined },
+				{ agent: "delegate", model: "openai-codex/gpt-5.3-codex-spark", thinking: "low", count: 3, taskSuffix: undefined },
+				{ agent: "delegate", model: "openai-codex/gpt-5.4-mini", thinking: "high", count: 2, taskSuffix: undefined },
 			],
 		);
 		assert.equal(prompt.reviewers?.length, 2);
 		assert.deepEqual(
-			prompt.reviewers?.map((slot) => ({ agent: slot.agent, model: slot.model, count: slot.count, taskSuffix: slot.taskSuffix })),
+			prompt.reviewers?.map((slot) => ({ agent: slot.agent, model: slot.model, thinking: slot.thinking, count: slot.count, taskSuffix: slot.taskSuffix })),
 			[
-				{ agent: "reviewer", model: "openai-codex/gpt-5.3-codex-spark:medium", count: 2, taskSuffix: undefined },
-				{ agent: "reviewer", model: "openai-codex/gpt-5.4-mini:high", count: undefined, taskSuffix: "Focus extra attention on regression risk and missing edge cases." },
+				{ agent: "reviewer", model: "openai-codex/gpt-5.3-codex-spark", thinking: "medium", count: 2, taskSuffix: undefined },
+				{ agent: "reviewer", model: "openai-codex/gpt-5.4-mini", thinking: "high", count: undefined, taskSuffix: "Focus extra attention on regression risk and missing edge cases." },
 			],
 		);
 		assert.deepEqual(prompt.finalApplier, {
 			agent: "delegate",
-			model: "openai-codex/gpt-5.4-mini:xhigh",
+			model: "openai-codex/gpt-5.4-mini",
+			thinking: "xhigh",
 			taskSuffix: "Apply the final patch directly on the current branch, run best-effort relevant verification, and report changed files plus verification run.",
 		});
 		assert.equal(prompt.content, "$@");
@@ -1247,7 +1248,8 @@ test("loadPromptsWithModel validates bestOfN compare lineups and cutover diagnos
 					assert.equal(prompt.reviewers?.[0]?.cwd, "/tmp/repo");
 					assert.equal(prompt.reviewers?.[0]?.count, 2);
 					assert.equal(prompt.finalApplier?.agent, "delegate");
-					assert.equal(prompt.finalApplier?.model, "openai-codex/gpt-5.4:low");
+					assert.equal(prompt.finalApplier?.model, "openai-codex/gpt-5.4");
+					assert.equal(prompt.finalApplier?.thinking, "low");
 					assert.equal(prompt.finalApplier?.taskSuffix, "Prefer merge plans over narrow wins when the diffs justify it.");
 					assert.equal(prompt.worktree, true);
 					assert.match(buildPromptCommandDescription(prompt), /workers:4/);

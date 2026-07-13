@@ -370,7 +370,7 @@ test("extractLineupOverrides parses worker/reviewer/final-applier slot aliases f
 				{
 					target: "finalApplier",
 					mode: "replace",
-					slots: [{ agent: "delegate", model: "openai-codex/gpt-5.4:low", taskSuffix: "Prefer merge plans when they beat any single worker." }],
+					slots: [{ agent: "delegate", model: "openai-codex/gpt-5.4", thinking: "low", taskSuffix: "Prefer merge plans when they beat any single worker." }],
 				},
 			],
 		},

@@ -26,7 +26,7 @@ pi install npm:pi-prompt-template-model
 
 Restart pi to load the extension.
 
-For delegated subagent execution (`subagent` and `inheritContext` frontmatter), install [pi-subagents](https://github.com/nicobailon/pi-subagents/) separately:
+For delegated subagent execution (`subagent` and `inheritContext` frontmatter), install [pi-subagents](https://github.com/CAAIRocks/pi-subagents/) separately:
 
 ```bash
 pi install npm:pi-subagents
@@ -71,7 +71,7 @@ All fields are optional. Templates that don't use any extension features (no `mo
 | Field | Default | What it does |
 |-------|---------|--------------|
 | `model` | current session model | Which model to use. Accepts a single model, a `provider/model-id` pair, or a comma-separated fallback list (see [Model Format](#model-format)). Ignored when `chain` is set. |
-| `skill` | — | Injects a skill's content as a context message before the agent handles your task. No extra round-trip — the agent gets the expertise immediately. See [Skill Resolution](#skill-resolution). |
+| `skill` / `skills` | — | Injects one or more skills before the agent handles your task. `skill` accepts one name; `skills` accepts an array. See [Skill Resolution](#skill-resolution). |
 | `thinking` | — | Thinking level for the model: `off`, `minimal`, `low`, `medium`, `high`, or `xhigh`. |
 | `description` | — | Short text shown next to the command in autocomplete. |
 | `chain` | — | Declares a reusable pipeline of templates (`step -> step`). When set, the body is ignored. See [Chain Templates](#chain-templates). |
@@ -93,13 +93,13 @@ All fields are optional. Templates that don't use any extension features (no `mo
 
 | Field | Default | What it does |
 |-------|---------|--------------|
-| `subagent` | — | Delegate execution to a subagent instead of running in the current session. `true` uses the default `delegate` agent; a string value like `reviewer` targets that specific agent. Requires [pi-subagents](https://github.com/nicobailon/pi-subagents/). |
-| `inheritContext` | `false` | Only meaningful with `subagent`. When `true`, the subagent receives a fork of the current conversation context instead of starting fresh. |
+| `subagent` | — | Delegate execution to a subagent instead of running in the current session. `true` uses the default `delegate` agent; a string value like `reviewer` targets that specific agent. Requires [pi-subagents](https://github.com/CAAIRocks/pi-subagents/). |
+| `inheritContext` | `false` | Only meaningful with `subagent`. When `true`, the delegated request includes a bounded inherited-context seed from the active session. Fresh delegated runs receive no seed. |
 | `parallel` | — | Delegated prompts only. Repeats the same subagent in parallel `N` times. Each copy gets a slot header like `[Parallel subagent 2/3]` prepended to the task. Must be an integer greater than or equal to 2. |
 | `bestOfN` | — | Compare templates only. Nested compare authoring block with `workers`, `reviewers`, optional `finalApplier`, and optional `worktree`. Top-level compare fields are not supported in templates. |
-| `bestOfN.workers` | — | Ordered worker lineup used for the worker phase. Each slot object supports optional `agent`/`subagent`, optional `model`, optional `task`, optional `taskSuffix`, optional `cwd`, and optional `count`. If both `agent` and `subagent` are omitted, the default agent is `delegate`. |
+| `bestOfN.workers` | — | Ordered worker lineup used for the worker phase. Each slot object supports optional `agent`/`subagent`, optional `model`, optional `thinking`, optional `skill`/`skills`, optional `task`, optional `taskSuffix`, optional `cwd`, and optional `count`. If both `agent` and `subagent` are omitted, the default agent is `delegate`. |
 | `bestOfN.reviewers` | — | Ordered reviewer lineup used after worker aggregation. Slot shape matches workers. If both `agent` and `subagent` are omitted, the default agent is `reviewer`. |
-| `bestOfN.finalApplier` | — | Optional single-slot final apply phase that edits the real branch after reviewers. Supports optional `agent`/`subagent`, optional `model`, optional `task`, and optional `taskSuffix`. If both `agent` and `subagent` are omitted, the default agent is `delegate`. `count` and `cwd` are not supported. Requires `bestOfN.worktree: true` at runtime. |
+| `bestOfN.finalApplier` | — | Optional single-slot final apply phase that edits the real branch after reviewers. Supports optional `agent`/`subagent`, optional `model`, optional `thinking`, optional `skill`/`skills`, optional `task`, and optional `taskSuffix`. If both `agent` and `subagent` are omitted, the default agent is `delegate`. `count` and `cwd` are not supported. Requires `bestOfN.worktree: true` at runtime. |
 | `cwd` | — | Working directory for delegated subagent subprocesses. Must be an absolute path (`~/...` is expanded). Valid with `subagent`, on chain templates as the default cwd for delegated steps, and on compare prompts as the default repo cwd. Worker/reviewer slots can also set their own `cwd` inside `bestOfN.workers` / `bestOfN.reviewers`. |
 
 ## Model Format
@@ -243,7 +243,9 @@ inheritContext: true
 Audit this diff for correctness and edge cases: $@
 ```
 
-`inheritContext: true` forks the current conversation so the subagent has full context. Without it, the subagent starts fresh.
+`inheritContext: true` asks the bridge to run in fork mode and this extension includes a deterministic, bounded context seed from the active session. The seed contains recent safe user/assistant/system/tool-result/custom text, excludes thinking blocks, truncates large tool results, applies message and character limits, and drops any unresolved trailing assistant tool call. Without `inheritContext`, delegated execution starts fresh and no context seed is sent.
+
+Delegated requests use a backend-neutral protocol shape. The primary `model` field is the effective model that actually resolved after fallback selection; any remaining requested models are sent in order as optional `fallbackModels`. `thinking` is forwarded as an optional requested thinking level, and resolved `skill`/`skills` are forwarded as optional skill payloads without changing the parent session's active model, thinking level, or queued skill state. Requests include `protocolVersion`, `compatibility`, and `capabilities` metadata so older bridges can ignore unknown optional fields safely.
 
 To force a subagent into a specific working directory, add `cwd`:
 
@@ -296,7 +298,7 @@ Prompt-template frontmatter authoring uses `bestOfN:`. Runtime overrides stay on
 - `--workers-append=<json-array>` / `--reviewers-append=<json-array>` append to the corresponding lineup.
 - `--final-applier=<json-object-or-one-element-array>` replaces the optional final apply slot.
 
-Each worker/reviewer JSON array entry must be an object with either `subagent` or `agent`, plus optional `model`, `task`, `taskSuffix`, `cwd`, and `count`. In worker slots, `"subagent": true` maps to `delegate`. In reviewer slots, `"subagent": true` maps to `reviewer`. `--final-applier=` accepts one slot object (or a one-element array) with `subagent`/`agent`, optional `model`, optional `task`, and optional `taskSuffix`; for this final slot, `"subagent": true` maps to `delegate`, and both `count` and `cwd` are not supported.
+Each worker/reviewer JSON array entry must be an object with either `subagent` or `agent`, plus optional `model`, `thinking`, `skill`/`skills`, `task`, `taskSuffix`, `cwd`, and `count`. A model may also use the legacy `model:thinking` suffix; it is normalized to `model` plus `thinking`. In worker slots, `"subagent": true` maps to `delegate`. In reviewer slots, `"subagent": true` maps to `reviewer`. `--final-applier=` accepts one slot object (or a one-element array) with `subagent`/`agent`, optional `model`, optional `thinking`, optional `skill`/`skills`, optional `task`, and optional `taskSuffix`; for this final slot, `"subagent": true` maps to `delegate`, and both `count` and `cwd` are not supported.
 
 ## Best-of-N Compare Prompt
 
@@ -547,7 +549,7 @@ Review and fix issues in this codebase.
 
 Iteration 1 runs Opus + `high`, iteration 2 runs GPT-5.4 + `xhigh`, iteration 3 runs Codex + `off`, then wraps back to Opus. The status bar shows which model is active: `loop 2/9 · gpt-5.4 xhigh`.
 
-This is especially useful for [ralph-style loops](https://ghuntley.com/ralph/) where different models catch different things. The `subagent` examples below require [pi-subagents](https://github.com/nicobailon/pi-subagents/). A single-model ralph loop that delegates with fresh context each iteration:
+This is especially useful for [ralph-style loops](https://ghuntley.com/ralph/) where different models catch different things. The `subagent` examples below require [pi-subagents](https://github.com/CAAIRocks/pi-subagents/). A single-model ralph loop that delegates with fresh context each iteration:
 
 ```markdown
 ---
@@ -806,5 +808,5 @@ $@
 - Prompt files are reloaded on session start and whenever an extension-owned command runs. If you add a new prompt file mid-session, run any extension command (like `/chain-prompts`), start a new session, or reload pi to pick it up.
 - Model restore state is in-memory. Closing pi mid-response loses it.
 - In chains, model-less steps inherit the chain-start model snapshot, not the previous step's model. This is intentional for deterministic behavior.
-- Delegated `subagent` prompts require [pi-subagents](https://github.com/nicobailon/pi-subagents/).
+- Delegated `subagent` prompts require [pi-subagents](https://github.com/CAAIRocks/pi-subagents/).
 - `run-prompt` must be explicitly enabled with `/prompt-tool on`.

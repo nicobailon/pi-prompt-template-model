@@ -555,7 +555,7 @@ test("compare prompt expands count, applies taskSuffix, and runs a final applier
 				"bestOfN:",
 				"  workers:",
 				"    - subagent: true",
-				"      model: anthropic/claude-sonnet-4-20250514",
+				"      model: anthropic/claude-sonnet-4-20250514:high",
 				"      taskSuffix: Save findings to `.compare-findings/w1.md`.",
 				"      count: 2",
 				"    - subagent: delegate",
@@ -565,7 +565,7 @@ test("compare prompt expands count, applies taskSuffix, and runs a final applier
 				"      count: 2",
 				"  finalApplier:",
 				"    subagent: reviewer",
-				"    model: anthropic/claude-sonnet-4-20250514",
+				"    model: anthropic/claude-sonnet-4-20250514:xhigh",
 				"    taskSuffix: Apply the best patch and report verification.",
 				"  worktree: true",
 				"---",
@@ -594,6 +594,7 @@ test("compare prompt expands count, applies taskSuffix, and runs a final applier
 						"anthropic/claude-sonnet-4-20250514",
 					],
 				);
+				assert.deepEqual(request.tasks?.map((task: any) => task.thinking), ["high", "high", undefined]);
 				assert.match(request.tasks?.[0]?.task ?? "", /^Implement: fix bug\n\nSave findings to `\.compare-findings\/w1\.md`\.$/);
 				assert.match(request.tasks?.[1]?.task ?? "", /^Implement: fix bug\n\nSave findings to `\.compare-findings\/w1\.md`\.$/);
 				assert.match(request.tasks?.[2]?.task ?? "", /^Implement: fix bug$/);
@@ -649,6 +650,7 @@ test("compare prompt expands count, applies taskSuffix, and runs a final applier
 			assert.equal(phase, 3);
 			assert.equal(request.agent, "reviewer");
 			assert.equal(request.model, "anthropic/claude-sonnet-4-20250514");
+			assert.equal(request.thinking, "xhigh");
 			assert.equal(request.cwd, cwd);
 			assert.equal(request.worktree, undefined);
 			assert.equal(request.tasks, undefined);

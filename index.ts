@@ -707,6 +707,8 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 			agent: string;
 			task: string;
 			model?: string;
+			thinking?: PromptWithModel["thinking"];
+			skills?: string[];
 			cwd: string;
 			inheritContext?: boolean;
 		},
@@ -716,6 +718,9 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 			name: options.name,
 			content: options.task,
 			models: options.model ? [options.model] : [],
+			thinking: options.thinking,
+			skill: options.skills?.[0],
+			skills: options.skills,
 			chain: undefined,
 			chainContext: undefined,
 			parallel: undefined,
@@ -838,6 +843,8 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 						agent: slot.agent,
 						task: buildLineupSlotTask(sharedTask, slot, taskArgs),
 						model: slot.model,
+						thinking: slot.thinking,
+						skills: slot.skills ?? (slot.skill ? [slot.skill] : undefined),
 						cwd: slot.cwd!,
 						inheritContext: true,
 					}),
@@ -878,6 +885,8 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 						agent: slot.agent,
 						task: buildLineupSlotTask(DEFAULT_COMPARE_REVIEWER_TASK, slot, taskArgs),
 						model: slot.model,
+						thinking: slot.thinking,
+						skills: slot.skills ?? (slot.skill ? [slot.skill] : undefined),
 						cwd: slot.cwd!,
 						inheritContext: false,
 					}),
@@ -928,6 +937,8 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 					agent: normalizedFinalApplier.agent,
 					task: buildLineupSlotTask(DEFAULT_COMPARE_FINAL_APPLIER_TASK, normalizedFinalApplier, taskArgs),
 					model: normalizedFinalApplier.model,
+					thinking: normalizedFinalApplier.thinking,
+					skills: normalizedFinalApplier.skills ?? (normalizedFinalApplier.skill ? [normalizedFinalApplier.skill] : undefined),
 					cwd: compareCwd,
 					inheritContext: false,
 				}),
