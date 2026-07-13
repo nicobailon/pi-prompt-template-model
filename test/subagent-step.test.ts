@@ -284,6 +284,10 @@ test("executeSubagentPromptStep adds bounded inherited context seed only for for
 						{ type: "thinking", thinking: "hidden chain of thought" },
 						{ type: "text", text: "I will inspect." },
 						{ type: "toolCall", id: "1", name: "bash", arguments: { command: "curl https://example.invalid/secret", path: "/tmp/secret", value: "SENSITIVE_VALUE", secret: "SECRET_VALUE" } },
+						{ type: "tool_use", id: "alt-1", name: "read", input: { path: "/tmp/alternate", value: "ALT_VALUE" } },
+						{ toolCall: { name: "write", arguments: '{"path":"/tmp/container","secret":"CONTAINER_SECRET"}' } },
+						{ type: "function", function: { name: "fetch", arguments: { command: "FUNCTION_COMMAND", secret: "FUNCTION_SECRET" } } },
+						{ name: "custom", command: "MALFORMED_COMMAND", path: "/tmp/malformed", value: "MALFORMED_VALUE", secret: "MALFORMED_SECRET" },
 					],
 				},
 			},
@@ -326,17 +330,42 @@ test("executeSubagentPromptStep adds bounded inherited context seed only for for
 		assert.equal(request.contextSeed.metadata.excludesUnresolvedTrailingToolCalls, true);
 		assert.equal(request.contextSeed.metadata.excludesToolCallArguments, true);
 		assert.equal(request.contextSeed.metadata.maxToolResultChars, 2000);
+		assert.equal(request.contextSeed.includedMessages, 3);
+		assert.equal(request.contextSeed.omittedMessages, 0);
+		assert.equal(request.contextSeed.maxMessages, 12);
+		assert.equal(request.contextSeed.maxChars, 24000);
+		assert.equal(request.contextSeed.messages.length, request.contextSeed.includedMessages);
+		assert.ok(request.contextSeed.messages.length <= request.contextSeed.maxMessages);
+		assert.ok(request.contextSeed.usedChars <= request.contextSeed.maxChars);
+		assert.equal(request.contextSeed.truncated, true);
 		assert.deepEqual(request.contextSeed.messages.map((message: any) => message.id), ["u1", "a1", "t1"]);
 		assert.equal(request.contextSeed.messages[1].content.includes("hidden chain of thought"), false);
-		assert.equal(request.contextSeed.messages[1].content, "I will inspect.\n[tool call: bash]");
+		assert.equal(
+			request.contextSeed.messages[1].content,
+			"I will inspect.\n[tool call: bash]\n[tool call: read]\n[tool call: write]\n[tool call: fetch]\n[tool call: custom]",
+		);
 		assert.match(request.contextSeed.messages[1].content, /\[tool call: bash\]/);
-		assert.equal(request.contextSeed.messages[1].content.includes("curl"), false);
-		assert.equal(request.contextSeed.messages[1].content.includes("/tmp/secret"), false);
-		assert.equal(request.contextSeed.messages[1].content.includes("SENSITIVE_VALUE"), false);
-		assert.equal(request.contextSeed.messages[1].content.includes("SECRET_VALUE"), false);
+		for (const omitted of [
+			"curl",
+			"/tmp/secret",
+			"SENSITIVE_VALUE",
+			"SECRET_VALUE",
+			"/tmp/alternate",
+			"ALT_VALUE",
+			"/tmp/container",
+			"CONTAINER_SECRET",
+			"FUNCTION_COMMAND",
+			"FUNCTION_SECRET",
+			"MALFORMED_COMMAND",
+			"/tmp/malformed",
+			"MALFORMED_VALUE",
+			"MALFORMED_SECRET",
+		]) {
+			assert.equal(request.contextSeed.messages[1].content.includes(omitted), false, `${omitted} should be omitted from inherited context seed`);
+		}
 		assert.equal(request.contextSeed.messages[2].role, "toolResult");
 		assert.equal(request.contextSeed.messages[2].truncated, true);
-		assert.ok(request.contextSeed.messages[2].content.length <= 2000);
+		assert.ok(request.contextSeed.messages[2].content.length <= request.contextSeed.metadata.maxToolResultChars);
 	});
 });
 

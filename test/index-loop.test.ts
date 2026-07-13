@@ -1775,6 +1775,37 @@ test("skills injects every resolved top-level skill in one before_agent_start me
 	});
 });
 
+test("missing later skills entry aborts before injecting earlier resolved skills", async () => {
+	await withTempHome(async (root) => {
+		const cwd = join(root, "project");
+		mkdirSync(join(cwd, ".pi", "prompts"), { recursive: true });
+		mkdirSync(join(root, ".pi", "agent", "skills", "tmux"), { recursive: true });
+		writeFileSync(
+			join(cwd, ".pi", "prompts", "deslop.md"),
+			"---\nmodel: anthropic/target-model\nskills:\n  - tmux\n  - missing-skill\n---\nTASK:$@",
+		);
+		writeFileSync(join(root, ".pi", "agent", "skills", "tmux", "SKILL.md"), "---\nname: tmux\ndescription: tmux helper\n---\nUse tmux.");
+
+		const baseModel = { provider: "anthropic", id: "base-model" };
+		const targetModel = { provider: "anthropic", id: "target-model" };
+		const pi = new FakePi();
+		pi.currentModel = baseModel;
+		promptModelExtension(pi as never);
+		const { ctx, getNotifications } = createContext(cwd, pi, [baseModel, targetModel]);
+		await pi.emit("session_start", {}, ctx);
+
+		const deslop = pi.commands.get("deslop");
+		assert.ok(deslop);
+		await deslop.handler("demo", ctx);
+
+		assert.deepEqual(pi.setModelCalls, []);
+		assert.deepEqual(pi.currentModel, baseModel);
+		assert.deepEqual(pi.userMessages, []);
+		assert.equal(await pi.emitWithResult("before_agent_start", { systemPrompt: "BASE" }, ctx), undefined);
+		assert.match(getNotifications().join("\n"), /Skill "missing-skill" not found/);
+	});
+});
+
 test("skill resolves from registered skill commands and supports skill: prefix", async () => {
 	await withTempHome(async (root) => {
 		const cwd = join(root, "project");

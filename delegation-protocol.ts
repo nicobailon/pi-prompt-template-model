@@ -44,15 +44,61 @@ function stringifyUnknown(value: unknown): string {
 	}
 }
 
+const TOOL_CALL_BLOCK_TYPES = new Set(["toolCall", "tool_call", "toolUse", "tool_use", "function", "functionCall", "function_call"]);
+const TOOL_CALL_CONTAINER_KEYS = ["toolCall", "tool_call", "toolUse", "tool_use", "functionCall", "function_call"];
+const TOOL_ARGUMENT_KEYS = new Set(["arguments", "args", "input", "command", "path", "value", "secret"]);
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+	return value && typeof value === "object" ? value as Record<string, unknown> : undefined;
+}
+
+function hasToolArgumentPayload(record: Record<string, unknown>): boolean {
+	for (const key of TOOL_ARGUMENT_KEYS) {
+		if (Object.hasOwn(record, key)) return true;
+	}
+	const functionRecord = asRecord(record.function);
+	return !!functionRecord && hasToolArgumentPayload(functionRecord);
+}
+
 function isToolCallBlock(record: Record<string, unknown>): boolean {
 	const type = record.type;
-	if (type === "toolCall" || type === "tool_call" || type === "toolUse" || type === "tool_use" || type === "functionCall" || type === "function_call") return true;
-	const hasName = typeof record.name === "string" || typeof record.toolName === "string";
-	return hasName && (Object.hasOwn(record, "arguments") || Object.hasOwn(record, "input"));
+	if (typeof type === "string" && TOOL_CALL_BLOCK_TYPES.has(type)) return true;
+	for (const key of TOOL_CALL_CONTAINER_KEYS) {
+		if (Object.hasOwn(record, key)) return true;
+	}
+	return hasToolArgumentPayload(record);
 }
 
 function getToolCallName(record: Record<string, unknown>): string {
-	return typeof record.name === "string" ? record.name : typeof record.toolName === "string" ? record.toolName : "tool";
+	const functionRecord = asRecord(record.function);
+	for (const key of TOOL_CALL_CONTAINER_KEYS) {
+		const nestedRecord = asRecord(record[key]);
+		if (nestedRecord) return getToolCallName(nestedRecord);
+	}
+	return typeof record.name === "string"
+		? record.name
+		: typeof record.toolName === "string"
+			? record.toolName
+			: typeof record.functionName === "string"
+				? record.functionName
+				: typeof functionRecord?.name === "string"
+					? functionRecord.name
+					: "tool";
+}
+
+function omitToolArgumentPayloads(value: unknown): unknown {
+	if (Array.isArray(value)) return value.map(omitToolArgumentPayloads);
+	const record = asRecord(value);
+	if (!record) return value;
+	const sanitized: Record<string, unknown> = {};
+	for (const [key, child] of Object.entries(record)) {
+		sanitized[key] = TOOL_ARGUMENT_KEYS.has(key) ? "[omitted]" : omitToolArgumentPayloads(child);
+	}
+	return sanitized;
+}
+
+function stringifySeedValue(value: unknown): string {
+	return stringifyUnknown(omitToolArgumentPayloads(value));
 }
 
 function renderTextContent(text: string, maxChars?: number): { text: string; truncated: boolean } {
@@ -71,7 +117,7 @@ function renderContentBlocks(content: unknown, options?: { maxChars?: number }):
 			? [content]
 			: undefined;
 	if (!blocks) {
-		const rendered = renderTextContent(stringifyUnknown(content), options?.maxChars);
+		const rendered = renderTextContent(stringifySeedValue(content), options?.maxChars);
 		return { ...rendered, hasToolCall: false };
 	}
 
@@ -89,7 +135,7 @@ function renderContentBlocks(content: unknown, options?: { maxChars?: number }):
 			continue;
 		}
 		if (type === "text") {
-			parts.push(typeof record.text === "string" ? record.text : stringifyUnknown(record.text));
+			parts.push(typeof record.text === "string" ? record.text : stringifySeedValue(record.text));
 			continue;
 		}
 		if (type === "toolResult" || type === "tool_result") {
@@ -101,7 +147,7 @@ function renderContentBlocks(content: unknown, options?: { maxChars?: number }):
 			continue;
 		}
 		if (type === "image") continue;
-		const rendered = stringifyUnknown(block);
+		const rendered = stringifySeedValue(block);
 		if (rendered && rendered !== "{}") parts.push(rendered);
 	}
 
@@ -205,6 +251,7 @@ export function buildDelegatedContextSeed(
 
 		let content = entry.content;
 		let entryTruncated = entry.truncated === true;
+		truncated ||= entryTruncated;
 		if (content.length > remaining) {
 			const capped = truncateText(content, remaining);
 			content = capped.text;
