@@ -44,29 +44,55 @@ function stringifyUnknown(value: unknown): string {
 	}
 }
 
+function isToolCallBlock(record: Record<string, unknown>): boolean {
+	const type = record.type;
+	if (type === "toolCall" || type === "tool_call" || type === "toolUse" || type === "tool_use" || type === "functionCall" || type === "function_call") return true;
+	const hasName = typeof record.name === "string" || typeof record.toolName === "string";
+	return hasName && (Object.hasOwn(record, "arguments") || Object.hasOwn(record, "input"));
+}
+
+function getToolCallName(record: Record<string, unknown>): string {
+	return typeof record.name === "string" ? record.name : typeof record.toolName === "string" ? record.toolName : "tool";
+}
+
+function renderTextContent(text: string, maxChars?: number): { text: string; truncated: boolean } {
+	if (maxChars === undefined) return { text, truncated: false };
+	return truncateText(text, maxChars);
+}
+
 function renderContentBlocks(content: unknown, options?: { maxChars?: number }): { text: string; truncated: boolean; hasToolCall: boolean } {
-	if (typeof content === "string") return { text: content, truncated: false, hasToolCall: false };
-	if (!Array.isArray(content)) return { text: stringifyUnknown(content), truncated: false, hasToolCall: false };
+	if (typeof content === "string") {
+		const rendered = renderTextContent(content, options?.maxChars);
+		return { ...rendered, hasToolCall: false };
+	}
+	const blocks = Array.isArray(content)
+		? content
+		: content && typeof content === "object" && (Object.hasOwn(content as Record<string, unknown>, "type") || isToolCallBlock(content as Record<string, unknown>))
+			? [content]
+			: undefined;
+	if (!blocks) {
+		const rendered = renderTextContent(stringifyUnknown(content), options?.maxChars);
+		return { ...rendered, hasToolCall: false };
+	}
 
 	const parts: string[] = [];
 	let truncated = false;
 	let hasToolCall = false;
-	for (const block of content) {
+	for (const block of blocks) {
 		if (!block || typeof block !== "object") continue;
 		const record = block as Record<string, unknown>;
 		const type = record.type;
 		if (type === "thinking" || type === "reasoning") continue;
+		if (isToolCallBlock(record)) {
+			hasToolCall = true;
+			parts.push(`[tool call: ${getToolCallName(record)}]`);
+			continue;
+		}
 		if (type === "text") {
 			parts.push(typeof record.text === "string" ? record.text : stringifyUnknown(record.text));
 			continue;
 		}
-		if (type === "toolCall") {
-			hasToolCall = true;
-			const name = typeof record.name === "string" ? record.name : "tool";
-			parts.push(`[tool call: ${name}] ${stringifyUnknown(record.arguments ?? {})}`.trim());
-			continue;
-		}
-		if (type === "toolResult") {
+		if (type === "toolResult" || type === "tool_result") {
 			const name = typeof record.name === "string" ? record.name : typeof record.toolName === "string" ? record.toolName : "tool";
 			const rendered = stringifyUnknown(record.content ?? record.result ?? record.text ?? "");
 			const capped = truncateText(rendered, TOOL_RESULT_MAX_CHARS);
@@ -205,6 +231,7 @@ export function buildDelegatedContextSeed(
 			maxToolResultChars: TOOL_RESULT_MAX_CHARS,
 			excludesThinking: true,
 			excludesUnresolvedTrailingToolCalls: true,
+			excludesToolCallArguments: true,
 		},
 		messages: selected,
 		includedMessages: selected.length,

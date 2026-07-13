@@ -7,8 +7,9 @@
 - Compare lineups now support per-slot `thinking` plus one-or-many `skill` / `skills`, including normalization of legacy `model:thinking` suffixes.
 
 ### Changed
-- `inheritContext` delegated runs now include a deterministic bounded seed from the active session while fresh delegated runs send no seed. The seed excludes thinking blocks, truncates large tool results, drops unresolved trailing tool calls, and includes metadata about its limits.
-- Delegated model/thinking/skill resolution is forwarded to the bridge without mutating the parent session's active model, thinking level, or skill queue.
+- `inheritContext` delegated runs now include a deterministic bounded seed from the active session while fresh delegated runs send no seed. The seed excludes thinking blocks and tool-call argument payloads, caps large tool results, drops unresolved trailing tool calls, and includes metadata about its limits. It is bounded context, not a sensitive-data filter for included conversation text or tool-result previews.
+- Model/thinking/skill resolution is forwarded for delegated runs without mutating the parent session's active model, thinking level, or skill queue.
+- Inline prompt runs now inject every resolved top-level `skills` entry in one context message instead of only the first normalized skill.
 
 ## [0.10.0] - 2026-07-01
 

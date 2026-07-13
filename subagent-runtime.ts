@@ -43,6 +43,7 @@ export interface DelegatedSubagentContextSeedMetadata {
 	maxToolResultChars: number;
 	excludesThinking: true;
 	excludesUnresolvedTrailingToolCalls: true;
+	excludesToolCallArguments: true;
 }
 
 export interface DelegatedSubagentContextSeed {

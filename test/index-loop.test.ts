@@ -1730,6 +1730,51 @@ test("skill injects as before_agent_start message without mutating system prompt
 	});
 });
 
+test("skills injects every resolved top-level skill in one before_agent_start message", async () => {
+	await withTempHome(async (root) => {
+		const cwd = join(root, "project");
+		mkdirSync(join(cwd, ".pi", "prompts"), { recursive: true });
+		mkdirSync(join(root, ".pi", "agent", "skills", "tmux"), { recursive: true });
+		mkdirSync(join(root, ".pi", "agent", "skills", "audit"), { recursive: true });
+		writeFileSync(
+			join(cwd, ".pi", "prompts", "deslop.md"),
+			`---\nmodel: ${MODEL_ID}\nskills:\n  - tmux\n  - audit\n---\nTASK:$@`,
+		);
+		writeFileSync(join(root, ".pi", "agent", "skills", "tmux", "SKILL.md"), "---\nname: tmux\ndescription: tmux helper\n---\nUse tmux.");
+		writeFileSync(join(root, ".pi", "agent", "skills", "audit", "SKILL.md"), "---\nname: audit\ndescription: audit helper\n---\nUse audit.");
+
+		const pi = new FakePi();
+		promptModelExtension(pi as never);
+		const { ctx } = createContext(cwd, pi);
+		await pi.emit("session_start", {}, ctx);
+
+		const deslop = pi.commands.get("deslop");
+		assert.ok(deslop);
+		await deslop.handler("demo", ctx);
+		assert.deepEqual(pi.userMessages, ["TASK:demo"]);
+
+		const beforeStart = await pi.emitWithResult("before_agent_start", { systemPrompt: "BASE" }, ctx);
+		assert.ok(beforeStart);
+		const message = beforeStart.message as
+			| {
+					customType?: string;
+					content?: string;
+					details?: {
+						skillName?: string;
+						skills?: Array<{ skillName: string; skillContent: string; skillPath: string }>;
+					};
+			  }
+			| undefined;
+		assert.ok(message);
+		assert.equal(message.customType, "skill-loaded");
+		assert.match(message.content ?? "", /<skill name="tmux">\nUse tmux\.\n<\/skill>/);
+		assert.match(message.content ?? "", /<skill name="audit">\nUse audit\.\n<\/skill>/);
+		assert.equal(message.details?.skillName, "tmux");
+		assert.deepEqual(message.details?.skills?.map((skill) => skill.skillName), ["tmux", "audit"]);
+		assert.equal(await pi.emitWithResult("before_agent_start", { systemPrompt: "BASE" }, ctx), undefined);
+	});
+});
+
 test("skill resolves from registered skill commands and supports skill: prefix", async () => {
 	await withTempHome(async (root) => {
 		const cwd = join(root, "project");

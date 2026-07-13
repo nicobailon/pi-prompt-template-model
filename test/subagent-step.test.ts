@@ -283,6 +283,7 @@ test("executeSubagentPromptStep adds bounded inherited context seed only for for
 					content: [
 						{ type: "thinking", thinking: "hidden chain of thought" },
 						{ type: "text", text: "I will inspect." },
+						{ type: "toolCall", id: "1", name: "bash", arguments: { command: "curl https://example.invalid/secret", path: "/tmp/secret", value: "SENSITIVE_VALUE", secret: "SECRET_VALUE" } },
 					],
 				},
 			},
@@ -323,8 +324,16 @@ test("executeSubagentPromptStep adds bounded inherited context seed only for for
 		assert.equal(request.contextSeed.kind, "bounded-session-context");
 		assert.equal(request.contextSeed.metadata.excludesThinking, true);
 		assert.equal(request.contextSeed.metadata.excludesUnresolvedTrailingToolCalls, true);
+		assert.equal(request.contextSeed.metadata.excludesToolCallArguments, true);
+		assert.equal(request.contextSeed.metadata.maxToolResultChars, 2000);
 		assert.deepEqual(request.contextSeed.messages.map((message: any) => message.id), ["u1", "a1", "t1"]);
 		assert.equal(request.contextSeed.messages[1].content.includes("hidden chain of thought"), false);
+		assert.equal(request.contextSeed.messages[1].content, "I will inspect.\n[tool call: bash]");
+		assert.match(request.contextSeed.messages[1].content, /\[tool call: bash\]/);
+		assert.equal(request.contextSeed.messages[1].content.includes("curl"), false);
+		assert.equal(request.contextSeed.messages[1].content.includes("/tmp/secret"), false);
+		assert.equal(request.contextSeed.messages[1].content.includes("SENSITIVE_VALUE"), false);
+		assert.equal(request.contextSeed.messages[1].content.includes("SECRET_VALUE"), false);
 		assert.equal(request.contextSeed.messages[2].role, "toolResult");
 		assert.equal(request.contextSeed.messages[2].truncated, true);
 		assert.ok(request.contextSeed.messages[2].content.length <= 2000);

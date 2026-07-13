@@ -141,7 +141,7 @@ model: anthropic/claude-haiku-4-5, openrouter/claude-haiku-4-5, claude-sonnet-4-
 
 Normally, pi lists available skills in the system prompt, the agent reads your task, decides which skill it needs, and loads it with the read tool. That's an extra round-trip, and the agent might not pick the right one.
 
-The `skill` field bypasses all of that:
+The `skill` / `skills` fields bypass all of that:
 
 ```markdown
 ---
@@ -152,7 +152,15 @@ skill: surf
 $@
 ```
 
-The skill content is injected as a context message before the agent processes your task. No decision-making, no tool call — immediate expertise. If the skill file can't be found, the command fails fast instead of running without it.
+The resolved skill content is injected as one context message before the agent processes your task. No decision-making, no tool call — immediate expertise. If any requested skill file can't be found, the command fails fast instead of running without it.
+
+To inject several skills for one inline prompt turn, use `skills`:
+
+```yaml
+skills:
+  - surf
+  - tmux
+```
 
 ### Skill Resolution
 
@@ -243,7 +251,7 @@ inheritContext: true
 Audit this diff for correctness and edge cases: $@
 ```
 
-`inheritContext: true` asks the bridge to run in fork mode and this extension includes a deterministic, bounded context seed from the active session. The seed contains recent safe user/assistant/system/tool-result/custom text, excludes thinking blocks, truncates large tool results, applies message and character limits, and drops any unresolved trailing assistant tool call. Without `inheritContext`, delegated execution starts fresh and no context seed is sent.
+`inheritContext: true` asks delegated execution to include a deterministic, bounded context seed from the active session. The seed contains recent user/assistant/system/tool-result/custom text plus neutral tool-call markers by name only. It excludes thinking blocks, tool-call argument payloads, and any unresolved trailing assistant tool call; caps tool-result text; applies message and character limits; and includes metadata about those limits. Bounded context is not a sensitive-data filter: any included conversation text or tool-result preview is passed through as context. Without `inheritContext`, delegated execution starts fresh and no context seed is sent.
 
 Delegated requests use a backend-neutral protocol shape. The primary `model` field is the effective model that actually resolved after fallback selection; any remaining requested models are sent in order as optional `fallbackModels`. `thinking` is forwarded as an optional requested thinking level, and resolved `skill`/`skills` are forwarded as optional skill payloads without changing the parent session's active model, thinking level, or queued skill state. Requests include `protocolVersion`, `compatibility`, and `capabilities` metadata so older bridges can ignore unknown optional fields safely.
 

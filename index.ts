@@ -29,7 +29,7 @@ import {
 	type DelegationLineupSlot,
 	type PromptWithModel,
 } from "./prompt-loader.ts";
-import { renderSkillLoaded, type SkillLoadedDetails } from "./skill-loaded-renderer.ts";
+import { renderSkillLoaded, type SkillLoadedDetails, type SkillLoadedSkillDetails } from "./skill-loaded-renderer.ts";
 import { createToolManager } from "./tool-manager.ts";
 import { executeSubagentPromptStep, type DelegatedPromptParallelResult } from "./subagent-step.ts";
 import { DEFAULT_SUBAGENT_NAME, PROMPT_TEMPLATE_SUBAGENT_MESSAGE_TYPE } from "./subagent-runtime.ts";
@@ -211,39 +211,51 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 		return undefined;
 	}
 
-	function resolveSkillMessage(skillName: string | undefined, cwd: string): SkillMessageResolution {
-		if (!skillName) {
+	function resolveSkillMessage(skillNames: string[] | string | undefined, cwd: string): SkillMessageResolution {
+		const requestedSkillNames = Array.isArray(skillNames) ? skillNames : skillNames ? [skillNames] : [];
+		if (requestedSkillNames.length === 0) {
 			return { kind: "none" };
 		}
 
-		const normalizedSkillName = normalizeSkillName(skillName);
-		if (!normalizedSkillName) {
-			return { kind: "error", error: `Skill "${skillName}" not found` };
+		const resolvedSkills: SkillLoadedSkillDetails[] = [];
+		const contentParts: string[] = [];
+		for (const skillName of requestedSkillNames) {
+			const normalizedSkillName = normalizeSkillName(skillName);
+			if (!normalizedSkillName) {
+				return { kind: "error", error: `Skill "${skillName}" not found` };
+			}
+
+			const skillPath =
+				resolveRegisteredSkillPath(skillName) ?? (isPathResolvableSkillName(normalizedSkillName) ? resolveSkillPath(normalizedSkillName, cwd) : undefined);
+			if (!skillPath) {
+				return { kind: "error", error: `Skill "${skillName}" not found` };
+			}
+
+			try {
+				const skillContent = readSkillContent(skillPath);
+				resolvedSkills.push({ skillName: normalizedSkillName, skillContent, skillPath });
+				contentParts.push(`<skill name="${normalizedSkillName}">\n${skillContent}\n</skill>`);
+			} catch (error) {
+				return {
+					kind: "error",
+					error: `Failed to read skill "${skillName}": ${error instanceof Error ? error.message : String(error)}`,
+				};
+			}
 		}
 
-		const skillPath =
-			resolveRegisteredSkillPath(skillName) ?? (isPathResolvableSkillName(normalizedSkillName) ? resolveSkillPath(normalizedSkillName, cwd) : undefined);
-		if (!skillPath) {
-			return { kind: "error", error: `Skill "${skillName}" not found` };
-		}
-
-		try {
-			const skillContent = readSkillContent(skillPath);
-			return {
-				kind: "ready",
-				message: {
-					customType: "skill-loaded",
-					content: `<skill name="${normalizedSkillName}">\n${skillContent}\n</skill>`,
-					display: true,
-					details: { skillName: normalizedSkillName, skillContent, skillPath },
+		const primarySkill = resolvedSkills[0]!;
+		return {
+			kind: "ready",
+			message: {
+				customType: "skill-loaded",
+				content: contentParts.join("\n\n"),
+				display: true,
+				details: {
+					...primarySkill,
+					...(resolvedSkills.length > 1 ? { skills: resolvedSkills } : {}),
 				},
-			};
-		} catch (error) {
-			return {
-				kind: "error",
-				error: `Failed to read skill "${skillName}": ${error instanceof Error ? error.message : String(error)}`,
-			};
-		}
+			},
+		};
 	}
 
 	async function waitForTurnStart(ctx: ExtensionContext) {
@@ -363,7 +375,7 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 			notify(ctx, prepared.warning, "warning");
 		}
 
-		const skillResolution = resolveSkillMessage(prompt.skill, ctx.cwd);
+		const skillResolution = resolveSkillMessage(prompt.skills ?? (prompt.skill ? [prompt.skill] : undefined), ctx.cwd);
 		if (skillResolution.kind === "error") {
 			notify(ctx, skillResolution.error, "error");
 			return "aborted";
