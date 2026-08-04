@@ -152,7 +152,7 @@ skill: surf
 $@
 ```
 
-For inline runs, every skill is resolved first and its full content is injected in a separate `<skill name="...">` block within one context message before the agent processes your task. For delegated runs, skill bodies are not prepended to the task; the outbound request carries each resolved name and path instead. If any declared skill can't be found or read, the command fails before the inline turn or delegated request starts.
+For inline runs, every skill is resolved first and its full content is injected in a separate `<skill name="...">` block within one context message before the agent processes your task. For single delegated runs, skill bodies are not prepended to the task; the outbound pi-subagents request uses the versioned `skill` field with resolved skill names. Parallel delegated runs also resolve every declared skill before emitting the request and carry name-only `skill` metadata per task for compatible bridges. If any declared skill can't be found or read, the command fails before the inline turn or delegated request starts.
 
 ### Skill Resolution
 
@@ -246,7 +246,7 @@ inheritContext: true
 Audit this diff for correctness and edge cases: $@
 ```
 
-`inheritContext: true` forks the current conversation so the subagent has full context. Without it, the subagent starts fresh. Declared skills are resolved against the delegated `cwd` and attached to request metadata as names and paths; their bodies are never prepended to delegated task text.
+`inheritContext: true` forks the current conversation so the subagent has full context. Without it, the subagent starts fresh. Declared skills are resolved against the delegated `cwd` and sent as skill names on the delegation request; their bodies are never prepended to delegated task text.
 
 To force a subagent into a specific working directory, add `cwd`:
 

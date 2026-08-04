@@ -242,7 +242,7 @@ test("delegated prompts honor default agent, runtime override, and inheritContex
 	});
 });
 
-test("delegated prompts bind resolved skills as name/path metadata without changing task text", async () => {
+test("delegated prompts bind resolved skills through pi-subagents v1 skill names without changing task text", async () => {
 	await withTempHome(async (root) => {
 		const cwd = join(root, "host");
 		const delegatedCwd = join(root, "delegated");
@@ -261,12 +261,11 @@ test("delegated prompts bind resolved skills as name/path metadata without chang
 		promptModelExtension(pi as never);
 		await pi.emit("session_start", {}, ctx);
 		respondWithDelegatedResult(pi, (request) => {
+			assert.equal(request.version, 1);
 			assert.equal(request.task, "do work");
 			assert.doesNotMatch(request.task, /Delegated (tmux|audit) body/);
-			assert.deepEqual(request.skills, [
-				{ name: "tmux", path: join(root, ".pi", "agent", "skills", "tmux", "SKILL.md") },
-				{ name: "audit", path: join(delegatedCwd, ".pi", "skills", "audit", "SKILL.md") },
-			]);
+			assert.deepEqual(request.skill, ["tmux", "audit"]);
+			assert.equal(request.skills, undefined);
 		});
 
 		await pi.commands.get("simplify")!.handler("", ctx);
@@ -401,7 +400,7 @@ test("parallel chain step delegates with tasks payload", async () => {
 		promptModelExtension(pi as never);
 		await pi.emit("session_start", {}, ctx);
 
-		let requestTasks: Array<{ agent: string; task: string; model?: string; skills?: Array<{ name: string; path: string }> }> | undefined;
+		let requestTasks: Array<{ agent: string; task: string; model?: string; skill?: string[] }> | undefined;
 		pi.events.on(PROMPT_TEMPLATE_SUBAGENT_REQUEST_EVENT, (payload) => {
 			const request = payload as any;
 			requestTasks = request.tasks;
@@ -433,8 +432,8 @@ test("parallel chain step delegates with tasks payload", async () => {
 		assert.equal(requestTasks?.length, 2);
 		assert.equal(requestTasks?.[0]?.agent, "delegate");
 		assert.equal(requestTasks?.[1]?.agent, "reviewer");
-		assert.deepEqual(requestTasks?.[0]?.skills, [{ name: "frontend", path: join(root, ".pi", "agent", "skills", "frontend", "SKILL.md") }]);
-		assert.deepEqual(requestTasks?.[1]?.skills, [{ name: "backend", path: join(root, ".pi", "agent", "skills", "backend", "SKILL.md") }]);
+		assert.deepEqual(requestTasks?.[0]?.skill, ["frontend"]);
+		assert.deepEqual(requestTasks?.[1]?.skill, ["backend"]);
 		assert.doesNotMatch(requestTasks?.map((task) => task.task).join("\n") ?? "", /skill body/i);
 		assert.equal(pi.customMessages.length, 1);
 		assert.equal(pi.userMessages.length, 1);
@@ -654,9 +653,7 @@ test("compare prompt expands count, applies taskSuffix, and runs a final applier
 			if (phase === 1) {
 				assert.equal(request.tasks?.length, 3);
 				assert.deepEqual(request.tasks?.map((task: any) => task.agent), ["delegate", "delegate", "delegate"]);
-				assert.deepEqual(request.tasks?.map((task: any) => task.skills), Array(3).fill([
-					{ name: "audit", path: join(root, ".pi", "agent", "skills", "audit", "SKILL.md") },
-				]));
+				assert.deepEqual(request.tasks?.map((task: any) => task.skill), Array(3).fill(["audit"]));
 				assert.deepEqual(
 					request.tasks?.map((task: any) => task.model),
 					[
@@ -700,9 +697,7 @@ test("compare prompt expands count, applies taskSuffix, and runs a final applier
 
 			if (phase === 2) {
 				assert.equal(request.tasks?.length, 2);
-				assert.deepEqual(request.tasks?.map((task: any) => task.skills), Array(2).fill([
-					{ name: "audit", path: join(root, ".pi", "agent", "skills", "audit", "SKILL.md") },
-				]));
+				assert.deepEqual(request.tasks?.map((task: any) => task.skill), Array(2).fill(["audit"]));
 				assert.match(request.tasks?.[0]?.task ?? "", /\[Worker outputs and worktree summaries\]/);
 				assert.match(request.tasks?.[0]?.task ?? "", /=== Worker 1 \(delegate, anthropic\/claude-sonnet-4-20250514\) ===\nw1/);
 				assert.match(request.tasks?.[0]?.task ?? "", /=== Worktree Changes ===/);
@@ -726,7 +721,9 @@ test("compare prompt expands count, applies taskSuffix, and runs a final applier
 			assert.equal(request.cwd, cwd);
 			assert.equal(request.worktree, undefined);
 			assert.equal(request.tasks, undefined);
-			assert.deepEqual(request.skills, [{ name: "audit", path: join(root, ".pi", "agent", "skills", "audit", "SKILL.md") }]);
+			assert.equal(request.version, 1);
+			assert.deepEqual(request.skill, ["audit"]);
+			assert.equal(request.skills, undefined);
 			assert.doesNotMatch(request.task ?? "", /Compare audit body/);
 			assert.match(request.task ?? "", /\[Worker outputs and worktree summaries\]/);
 			assert.match(request.task ?? "", /=== Worker 1 \(delegate, anthropic\/claude-sonnet-4-20250514\) ===\nw1/);

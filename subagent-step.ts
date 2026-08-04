@@ -18,6 +18,7 @@ import {
 	PROMPT_TEMPLATE_SUBAGENT_RESPONSE_EVENT,
 	PROMPT_TEMPLATE_SUBAGENT_STARTED_EVENT,
 	PROMPT_TEMPLATE_SUBAGENT_UPDATE_EVENT,
+	SUBAGENT_DELEGATION_PROTOCOL_VERSION,
 	updateDelegatedLiveState,
 	type DelegatedSkillBinding,
 	type DelegatedSubagentParallelResult,
@@ -26,6 +27,7 @@ import {
 	type DelegatedSubagentTask,
 	type DelegatedSubagentTaskProgress,
 	type DelegatedSubagentUpdate,
+	type SubagentDelegationV1Response,
 } from "./subagent-runtime.ts";
 import type { SubagentOverride } from "./args.ts";
 import { createDelegatedProgressWidget, DELEGATED_WIDGET_KEY } from "./subagent-widget.ts";
@@ -142,6 +144,49 @@ function renderParallelDelegatedText(
 			return `=== Parallel Task ${index + 1} (${result.agent}) ===\n${body}`;
 		})
 		.join("\n\n");
+}
+
+function buildAssistantTextMessage(text: string): Message[] {
+	const trimmed = text.trim();
+	if (!trimmed) return [];
+	return [{ role: "assistant", content: [{ type: "text", text: trimmed }] }] as Message[];
+}
+
+function skillNamesFromBindings(skills: DelegatedSkillBinding[] | undefined): string[] | undefined {
+	if (!skills?.length) return undefined;
+	return skills.map((skill) => skill.name);
+}
+
+function isVersionedV1Response(payload: Partial<SubagentDelegationV1Response>): payload is SubagentDelegationV1Response {
+	return payload.version === SUBAGENT_DELEGATION_PROTOCOL_VERSION && typeof payload.status === "string";
+}
+
+function versionedResponseChanged(payload: SubagentDelegationV1Response): boolean {
+	const fileMutation = payload.effects?.fileMutation;
+	return fileMutation?.attempted === true || fileMutation?.status === "observed";
+}
+
+function normalizeDelegatedResponse(data: unknown, request: DelegatedSubagentRequest): DelegatedSubagentResponse | undefined {
+	if (!data || typeof data !== "object") return undefined;
+	const payload = data as Partial<DelegatedSubagentResponse & SubagentDelegationV1Response>;
+	if (payload.requestId !== request.requestId) return undefined;
+	if (isVersionedV1Response(payload)) {
+		const output = typeof payload.output === "string" ? payload.output : "";
+		const isError = payload.status !== "completed";
+		return {
+			requestId: payload.requestId,
+			agent: payload.agent ?? request.agent,
+			task: request.task,
+			context: request.context,
+			model: payload.model ?? request.model,
+			cwd: request.cwd,
+			messages: buildAssistantTextMessage(output),
+			isError,
+			errorText: payload.error ?? (isError ? payload.status : undefined),
+			changed: versionedResponseChanged(payload),
+		};
+	}
+	return payload as DelegatedSubagentResponse;
 }
 
 function resolveDelegationName(prompt: PromptWithModel, override?: SubagentOverride): string | undefined {
@@ -370,8 +415,8 @@ async function requestDelegatedRun(
 
 		const onResponse = (data: unknown) => {
 			if (done || !data || typeof data !== "object") return;
-			const payload = data as Partial<DelegatedSubagentResponse>;
-			if (payload.requestId !== request.requestId) return;
+			const payload = normalizeDelegatedResponse(data, request);
+			if (!payload) return;
 			clearTimeout(startTimeout);
 			updateDelegatedLiveState(request.requestId, {
 				status: payload.isError ? "failed" : "completed",
@@ -382,7 +427,7 @@ async function requestDelegatedRun(
 				})),
 			});
 			clearWidget();
-			finish(() => resolve(payload as DelegatedSubagentResponse));
+			finish(() => resolve(payload));
 		};
 
 		let lastProgressStatus = "";
@@ -572,24 +617,28 @@ export async function executeSubagentPromptStep(options: DelegatedPromptOptions)
 		}
 	}
 
+	const requestSkill = isParallelRequest ? undefined : skillNamesFromBindings(preparedTasks[0]!.skills);
 	const request: DelegatedSubagentRequest = {
+		...(requestSkill ? { version: SUBAGENT_DELEGATION_PROTOCOL_VERSION, skill: requestSkill } : {}),
 		requestId: randomUUID(),
 		agent: preparedTasks[0]!.agent,
 		task: preparedTasks[0]!.task,
 		...(isParallelRequest
 			? {
-				tasks: preparedTasks.map<DelegatedSubagentTask>((task) => ({
-					agent: task.agent,
-					task: task.task,
-					model: task.model,
-					...(task.skills ? { skills: task.skills } : {}),
-					cwd: task.cwd,
-				})),
+				tasks: preparedTasks.map<DelegatedSubagentTask>((task) => {
+					const skill = skillNamesFromBindings(task.skills);
+					return {
+						agent: task.agent,
+						task: task.task,
+						model: task.model,
+						...(skill ? { skill } : {}),
+						cwd: task.cwd,
+					};
+				}),
 			}
 			: {}),
 		context: requestContext,
 		model: preparedTasks[0]!.model,
-		...(preparedTasks[0]!.skills ? { skills: preparedTasks[0]!.skills } : {}),
 		cwd: requestCwd,
 		...(options.worktree ? { worktree: true } : {}),
 	};
@@ -668,7 +717,7 @@ export async function executeSubagentPromptStep(options: DelegatedPromptOptions)
 			throw new Error("Delegated subagent returned no assistant text.");
 		}
 
-		const changed = delegatedMessagesChanged(messages);
+		const changed = response.changed ?? delegatedMessagesChanged(messages);
 		pi.sendMessage({
 			customType: PROMPT_TEMPLATE_SUBAGENT_MESSAGE_TYPE,
 			content: text,

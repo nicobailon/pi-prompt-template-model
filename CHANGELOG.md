@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- Aligned single delegated prompt skill bindings with the current pi-subagents versioned delegation contract by sending resolved skill names through `skill` instead of legacy name/path metadata.
+
 ## [0.11.0] - 2026-08-04
 
 ### Changed
