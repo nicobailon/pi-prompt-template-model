@@ -29,10 +29,10 @@ import {
 	type DelegationLineupSlot,
 	type PromptWithModel,
 } from "./prompt-loader.ts";
-import { renderSkillLoaded, type SkillLoadedDetails } from "./skill-loaded-renderer.ts";
+import { renderSkillLoaded, type SkillLoadedDetails, type SkillLoadedSkillDetails } from "./skill-loaded-renderer.ts";
 import { createToolManager } from "./tool-manager.ts";
 import { executeSubagentPromptStep, type DelegatedPromptParallelResult } from "./subagent-step.ts";
-import { DEFAULT_SUBAGENT_NAME, PROMPT_TEMPLATE_SUBAGENT_MESSAGE_TYPE } from "./subagent-runtime.ts";
+import { DEFAULT_SUBAGENT_NAME, PROMPT_TEMPLATE_SUBAGENT_MESSAGE_TYPE, type DelegatedSkillBinding } from "./subagent-runtime.ts";
 import { renderDelegatedSubagentResult } from "./subagent-renderer.ts";
 import {
 	PROMPT_TEMPLATE_DETERMINISTIC_COMPLETION_MESSAGE_TYPE,
@@ -212,41 +212,68 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 		return undefined;
 	}
 
-	function resolveSkillMessage(skillName: string | undefined, cwd: string, ctx?: ExtensionContext): SkillMessageResolution {
-		if (!skillName) {
-			return { kind: "none" };
-		}
+	function resolveSkills(skillNames: string[] | undefined, cwd: string, ctx?: ExtensionContext):
+		| { kind: "none" }
+		| { kind: "ready"; skills: SkillLoadedSkillDetails[] }
+		| { kind: "error"; error: string } {
+		if (!skillNames?.length) return { kind: "none" };
 
-		const normalizedSkillName = normalizeSkillName(skillName);
-		if (!normalizedSkillName) {
-			return { kind: "error", error: `Skill "${skillName}" not found` };
-		}
+		const resolvedSkills: SkillLoadedSkillDetails[] = [];
+		for (const skillName of skillNames) {
+			const normalizedSkillName = normalizeSkillName(skillName);
+			if (!normalizedSkillName || !isPathResolvableSkillName(normalizedSkillName)) {
+				return { kind: "error", error: `Skill "${skillName}" not found` };
+			}
 
-		const skillPath =
-			resolveRegisteredSkillPath(skillName) ?? (isPathResolvableSkillName(normalizedSkillName)
-				? resolveSkillPath(normalizedSkillName, cwd, { includeProjectSkills: ctx ? ctx.isProjectTrusted() : true })
-				: undefined);
-		if (!skillPath) {
-			return { kind: "error", error: `Skill "${skillName}" not found` };
-		}
+			const skillPath =
+				resolveRegisteredSkillPath(skillName) ??
+				resolveSkillPath(normalizedSkillName, cwd, { includeProjectSkills: ctx ? ctx.isProjectTrusted() : true });
+			if (!skillPath) {
+				return { kind: "error", error: `Skill "${skillName}" not found` };
+			}
 
-		try {
-			const skillContent = readSkillContent(skillPath);
-			return {
-				kind: "ready",
-				message: {
-					customType: "skill-loaded",
-					content: `<skill name="${normalizedSkillName}">\n${skillContent}\n</skill>`,
-					display: true,
-					details: { skillName: normalizedSkillName, skillContent, skillPath },
+			try {
+				resolvedSkills.push({
+					skillName: normalizedSkillName,
+					skillContent: readSkillContent(skillPath),
+					skillPath,
+				});
+			} catch (error) {
+				return {
+					kind: "error",
+					error: `Failed to read skill "${skillName}": ${error instanceof Error ? error.message : String(error)}`,
+				};
+			}
+		}
+		return { kind: "ready", skills: resolvedSkills };
+	}
+
+	function resolveSkillMessage(skillNames: string[] | undefined, cwd: string, ctx?: ExtensionContext): SkillMessageResolution {
+		const resolution = resolveSkills(skillNames, cwd, ctx);
+		if (resolution.kind !== "ready") return resolution;
+
+		const primarySkill = resolution.skills[0]!;
+		return {
+			kind: "ready",
+			message: {
+				customType: "skill-loaded",
+				content: resolution.skills
+					.map((skill) => `<skill name="${skill.skillName}">\n${skill.skillContent}\n</skill>`)
+					.join("\n\n"),
+				display: true,
+				details: {
+					...primarySkill,
+					...(resolution.skills.length > 1 ? { skills: resolution.skills } : {}),
 				},
-			};
-		} catch (error) {
-			return {
-				kind: "error",
-				error: `Failed to read skill "${skillName}": ${error instanceof Error ? error.message : String(error)}`,
-			};
-		}
+			},
+		};
+	}
+
+	function resolveDelegatedSkillBindings(skillNames: string[], cwd: string, ctx: ExtensionContext): DelegatedSkillBinding[] {
+		const resolution = resolveSkills(skillNames, cwd, ctx);
+		if (resolution.kind === "error") throw new Error(resolution.error);
+		if (resolution.kind === "none") return [];
+		return resolution.skills.map((skill) => ({ name: skill.skillName, path: skill.skillPath }));
 	}
 
 	async function waitForTurnStart(ctx: ExtensionContext) {
@@ -315,6 +342,7 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 						? await executeSubagentPromptStep({
 							pi,
 							ctx,
+							resolveSkillBindings: (skillNames, cwd) => resolveDelegatedSkillBindings(skillNames, cwd, ctx),
 							currentModel,
 							override,
 							signal: ctx.signal,
@@ -332,6 +360,7 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 							prompt,
 							args,
 							ctx,
+							resolveSkillBindings: (skillNames, cwd) => resolveDelegatedSkillBindings(skillNames, cwd, ctx),
 							currentModel,
 							override,
 							signal: ctx.signal,
@@ -831,6 +860,7 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 			const workerResult = await executeSubagentPromptStep({
 				pi,
 				ctx,
+				resolveSkillBindings: (skillNames, cwd) => resolveDelegatedSkillBindings(skillNames, cwd, ctx),
 				currentModel: baseModel,
 				signal: ctx.signal,
 				worktree: prompt.worktree === true,
@@ -871,6 +901,7 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 			const reviewerResult = await executeSubagentPromptStep({
 				pi,
 				ctx,
+				resolveSkillBindings: (skillNames, cwd) => resolveDelegatedSkillBindings(skillNames, cwd, ctx),
 				currentModel: baseModel,
 				signal: ctx.signal,
 				taskPreamble: reviewerPreamble,
@@ -917,6 +948,7 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 			const finalResult = await executeSubagentPromptStep({
 				pi,
 				ctx,
+				resolveSkillBindings: (skillNames, cwd) => resolveDelegatedSkillBindings(skillNames, cwd, ctx),
 				currentModel: baseModel,
 				signal: ctx.signal,
 				taskPreamble: buildFinalApplierPreamble(
@@ -1302,6 +1334,7 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 							delegated = await executeSubagentPromptStep({
 								pi,
 								ctx,
+								resolveSkillBindings: (skillNames, cwd) => resolveDelegatedSkillBindings(skillNames, cwd, ctx),
 								currentModel,
 								override: subagentOverride,
 								signal: ctx.signal,

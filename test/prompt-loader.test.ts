@@ -287,8 +287,23 @@ test("loadPromptsWithModel trims optional string frontmatter fields", () => {
 
 		const result = loadPromptsWithModel(cwd);
 		assert.equal(result.prompts.get("trimmed")?.description, "Trim me");
-		assert.equal(result.prompts.get("trimmed")?.skill, "tmux");
+		assert.deepEqual(result.prompts.get("trimmed")?.skill, ["tmux"]);
 		assert.equal(result.prompts.get("trimmed")?.thinking, "high");
+	});
+});
+
+test("loadPromptsWithModel normalizes comma-separated and array skill entries in order", () => {
+	withTempHome((root) => {
+		const cwd = join(root, "project");
+		mkdirSync(join(cwd, ".pi", "prompts"), { recursive: true });
+		writeFileSync(
+			join(cwd, ".pi", "prompts", "skills.md"),
+			'---\nskill:\n  - " tmux, skill:browser "\n  - ""\n  - tmux\n  - " skill:audit "\n---\nbody',
+		);
+
+		const result = loadPromptsWithModel(cwd);
+		assert.deepEqual(result.prompts.get("skills")?.skill, ["tmux", "browser", "audit"]);
+		assert.equal(result.diagnostics.length, 0);
 	});
 });
 
