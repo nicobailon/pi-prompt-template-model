@@ -159,6 +159,46 @@ test("executeSubagentPromptStep returns delegated change info", async () => {
 	});
 });
 
+test("executeSubagentPromptStep accepts pi-subagents v1 response output and effects", async () => {
+	await withDelegationBridge(async (root) => {
+		const pi = createPi();
+		const ctx = createCtx(root);
+		let requestSkill: unknown;
+
+		pi.events.on(PROMPT_TEMPLATE_SUBAGENT_REQUEST_EVENT, (data) => {
+			const request = data as any;
+			requestSkill = request.skill;
+			pi.events.emit(PROMPT_TEMPLATE_SUBAGENT_STARTED_EVENT, { version: 1, requestId: request.requestId });
+			pi.events.emit(PROMPT_TEMPLATE_SUBAGENT_RESPONSE_EVENT, {
+				version: 1,
+				requestId: request.requestId,
+				status: "completed",
+				agent: request.agent,
+				model: request.model,
+				output: "Done from v1.",
+				effects: { fileMutation: { status: "observed", attempted: true } },
+			});
+		});
+
+		const result = await executeSubagentPromptStep({
+			pi,
+			prompt: { ...prompt, skill: ["audit", "tmux"] },
+			args: [],
+			ctx,
+			currentModel: ctx.model,
+			resolveSkillBindings: () => [
+				{ name: "audit", path: join(root, "audit.md") },
+				{ name: "tmux", path: join(root, "tmux.md") },
+			],
+		});
+
+		assert.deepEqual(requestSkill, ["audit", "tmux"]);
+		assert.equal(result?.text, "Done from v1.");
+		assert.equal(result?.changed, true);
+		assert.equal(pi.customMessages.length, 1);
+	});
+});
+
 test("executeSubagentPromptStep forwards prompt cwd to delegated request", async () => {
 	await withDelegationBridge(async (root) => {
 		const pi = createPi();
