@@ -72,7 +72,7 @@ All fields are optional. Templates that don't use any extension features (no `mo
 |-------|---------|--------------|
 | `model` | current session model | Which model to use. Accepts a single model, a `provider/model-id` pair, or a comma-separated fallback list (see [Model Format](#model-format)). Ignored when `chain` is set. |
 | `skill` | — | Injects a skill's content as a context message before the agent handles your task. No extra round-trip — the agent gets the expertise immediately. See [Skill Resolution](#skill-resolution). |
-| `thinking` | — | Thinking level for the model: `off`, `minimal`, `low`, `medium`, `high`, or `xhigh`. |
+| `thinking` | — | Thinking level for the model: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. |
 | `description` | — | Short text shown next to the command in autocomplete. |
 | `chain` | — | Declares a reusable pipeline of templates (`step -> step`). When set, the body is ignored. See [Chain Templates](#chain-templates). |
 | `chainContext` | — | Chain templates only. Set to `summary` so delegated steps receive a compact summary of what previous steps did. Steps with `inheritContext: true` are excluded. See [Chain context for delegated steps](#chain-context-for-delegated-steps). |
@@ -166,8 +166,8 @@ skill: skill:tmux    # equivalent
 Resolution order:
 
 1. Registered skill commands from `pi.getCommands()` (source: `"skill"`)
-2. `<cwd>/.pi/skills/<name>/SKILL.md` or `<cwd>/.pi/skills/<name>.md`
-3. `.agents/skills` in the current directory and ancestors (up to the git root)
+2. `<cwd>/.pi/skills/<name>/SKILL.md` or `<cwd>/.pi/skills/<name>.md` when project trust is enabled
+3. `.agents/skills` in the current directory and ancestors (up to the git root) when project trust is enabled
 4. `~/.pi/agent/skills/<name>/SKILL.md` or `~/.pi/agent/skills/<name>.md`
 5. `~/.agents/skills/<name>/SKILL.md` or `~/.agents/skills/<name>.md`
 
@@ -537,7 +537,7 @@ Model, thinking level, and skill are maintained throughout. If `restore: true` (
 ```markdown
 ---
 model: claude-opus-4-6, gpt-5.4, gpt-5.3-codex
-thinking: high, xhigh, off
+thinking: high, max, off
 loop: 9
 rotate: true
 fresh: true
@@ -545,7 +545,7 @@ fresh: true
 Review and fix issues in this codebase.
 ```
 
-Iteration 1 runs Opus + `high`, iteration 2 runs GPT-5.4 + `xhigh`, iteration 3 runs Codex + `off`, then wraps back to Opus. The status bar shows which model is active: `loop 2/9 · gpt-5.4 xhigh`.
+Iteration 1 runs Opus + `high`, iteration 2 runs GPT-5.4 + `max`, iteration 3 runs Codex + `off`, then wraps back to Opus. The status bar shows which model is active: `loop 2/9 · gpt-5.4 max`.
 
 This is especially useful for [ralph-style loops](https://ghuntley.com/ralph/) where different models catch different things. The `subagent` examples below require [pi-subagents](https://github.com/nicobailon/pi-subagents/). A single-model ralph loop that delegates with fresh context each iteration:
 
@@ -565,7 +565,7 @@ Add `rotate` and multiple models to cycle different perspectives on each pass:
 ```markdown
 ---
 model: claude-opus-4-6, gpt-5.4, gpt-5.3-codex
-thinking: xhigh, high, high
+thinking: max, high, high
 loop: 9
 rotate: true
 fresh: true
@@ -579,7 +579,7 @@ Each iteration gets fresh context, a different model, and its own thinking level
 `thinking` pairing with `rotate: true`:
 
 - Single value (`thinking: high`) — applied to every model.
-- Comma-separated (`thinking: high, xhigh, off`) — positional, must match the number of models.
+- Comma-separated (`thinking: high, max, off`) — positional, must match the number of models.
 - Omitted — each iteration inherits the session default.
 
 Without `loop`, `rotate` has no effect and comma-separated `model` keeps normal fallback behavior.
@@ -775,7 +775,7 @@ The model switches, skill is injected, the agent responds, and output goes to st
 ---
 description: Deep code analysis with extended thinking
 model: claude-sonnet-4-20250514
-thinking: high
+thinking: max
 ---
 Analyze this code thoroughly, considering edge cases and potential issues: $@
 ```

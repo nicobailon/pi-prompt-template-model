@@ -82,28 +82,16 @@ export function createToolManager(pi: ExtensionAPI, deps: ToolManagerDeps) {
 					};
 				}
 				if (!deps.getStoredCtx()) {
-					return {
-						content: [{ type: "text", text: "No command context. Run any prompt command first to initialize." }],
-						details: {},
-						isError: true,
-					};
+					throw new Error("No command context. Run any prompt command first to initialize.");
 				}
 
 				const commandParam = (params as { command?: unknown }).command;
 				const command = typeof commandParam === "string" ? commandParam.trim() : "";
 				if (!command) {
-					return {
-						content: [{ type: "text", text: "No command specified." }],
-						details: {},
-						isError: true,
-					};
+					throw new Error("No command specified.");
 				}
 				if (toolQueuedCommand) {
-					return {
-						content: [{ type: "text", text: "A prompt command is already queued. Wait for it to execute." }],
-						details: {},
-						isError: true,
-					};
+					throw new Error("A prompt command is already queued. Wait for it to execute.");
 				}
 
 				toolQueuedCommand = command;

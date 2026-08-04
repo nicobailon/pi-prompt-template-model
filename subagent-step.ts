@@ -177,13 +177,14 @@ async function prepareDelegatedTask(
 		throw new Error(`cwd directory does not exist: ${effectiveCwd}`);
 	}
 	const agent = requestedAgent;
-	const preparationOptions = inheritedModel === undefined ? undefined : { inheritedModel };
 	const prepared = await preparePromptExecution(
 		task.prompt,
 		task.args,
 		currentModel,
 		ctx.modelRegistry,
-		preparationOptions,
+		inheritedModel === undefined
+			? { scopedModels: ctx.scopedModels }
+			: { inheritedModel, scopedModels: ctx.scopedModels },
 	);
 	if (!prepared) {
 		throw new Error(`No available model from: ${task.prompt.models.join(", ")}`);
@@ -472,7 +473,7 @@ async function requestDelegatedRun(
 			ctx.ui.setStatus("prompt-subagent", `delegating to ${requestLabel} · ${statusLine}`);
 		};
 
-		const onTerminalInput = ctx.hasUI
+		const onTerminalInput = ctx.mode === "tui"
 			? ctx.ui.onTerminalInput((input) => {
 				if (!matchesKey(input, Key.escape)) return undefined;
 				pi.events.emit(PROMPT_TEMPLATE_SUBAGENT_CANCEL_EVENT, {

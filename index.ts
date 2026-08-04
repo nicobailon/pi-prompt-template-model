@@ -158,8 +158,9 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 	}
 
 	function refreshPrompts(cwd: string, ctx?: ExtensionContext) {
-		const result = loadPromptsWithModel(cwd);
-		const chainResult = loadPromptsWithModel(cwd, true);
+		const promptLoaderOptions = { includeProjectPrompts: ctx ? ctx.isProjectTrusted() : true };
+		const result = loadPromptsWithModel(cwd, false, promptLoaderOptions);
+		const chainResult = loadPromptsWithModel(cwd, true, promptLoaderOptions);
 		prompts = result.prompts;
 		chainPrompts = chainResult.prompts;
 
@@ -211,7 +212,7 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 		return undefined;
 	}
 
-	function resolveSkillMessage(skillName: string | undefined, cwd: string): SkillMessageResolution {
+	function resolveSkillMessage(skillName: string | undefined, cwd: string, ctx?: ExtensionContext): SkillMessageResolution {
 		if (!skillName) {
 			return { kind: "none" };
 		}
@@ -222,7 +223,9 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 		}
 
 		const skillPath =
-			resolveRegisteredSkillPath(skillName) ?? (isPathResolvableSkillName(normalizedSkillName) ? resolveSkillPath(normalizedSkillName, cwd) : undefined);
+			resolveRegisteredSkillPath(skillName) ?? (isPathResolvableSkillName(normalizedSkillName)
+				? resolveSkillPath(normalizedSkillName, cwd, { includeProjectSkills: ctx ? ctx.isProjectTrusted() : true })
+				: undefined);
 		if (!skillPath) {
 			return { kind: "error", error: `Skill "${skillName}" not found` };
 		}
@@ -348,8 +351,8 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 
 		const prepared =
 			inheritedModel === undefined
-				? await preparePromptExecution(prompt, args, currentModel, ctx.modelRegistry)
-				: await preparePromptExecution(prompt, args, currentModel, ctx.modelRegistry, { inheritedModel });
+				? await preparePromptExecution(prompt, args, currentModel, ctx.modelRegistry, { scopedModels: ctx.scopedModels })
+				: await preparePromptExecution(prompt, args, currentModel, ctx.modelRegistry, { inheritedModel, scopedModels: ctx.scopedModels });
 		if (!prepared) {
 			notify(ctx, `No available model from: ${prompt.models.join(", ")}`, "error");
 			return "aborted";
@@ -363,7 +366,7 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 			notify(ctx, prepared.warning, "warning");
 		}
 
-		const skillResolution = resolveSkillMessage(prompt.skill, ctx.cwd);
+		const skillResolution = resolveSkillMessage(prompt.skill, ctx.cwd, ctx);
 		if (skillResolution.kind === "error") {
 			notify(ctx, skillResolution.error, "error");
 			return "aborted";
@@ -570,7 +573,7 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 	): Promise<Model<any> | undefined> {
 		const requestedModels = modelOverride ? [modelOverride] : prompt.models;
 		if (requestedModels.length > 0) {
-			const selected = await selectModelCandidate(requestedModels, currentModel, ctx.modelRegistry);
+			const selected = await selectModelCandidate(requestedModels, currentModel, ctx.modelRegistry, { scopedModels: ctx.scopedModels });
 			if (!selected) {
 				notify(ctx, `No available model from: ${requestedModels.join(", ")}`, "error");
 				return undefined;

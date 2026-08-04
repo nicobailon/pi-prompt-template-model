@@ -63,6 +63,9 @@ async function withTempHome(run: (root: string) => Promise<void>) {
 function createContext(cwd: string, pi: FakePi) {
 	return {
 		cwd,
+		mode: "print",
+		scopedModels: [],
+		isProjectTrusted() { return true; },
 		model: MODEL,
 		modelRegistry: {
 			find(provider: string, id: string) {

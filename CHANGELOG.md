@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Changed
+- Updated local Pi development dependencies to `@earendil-works/*` `^0.83.0` while keeping package installs on peer dependencies.
+- Project-local prompt and skill discovery now respects Pi project trust; global prompt and skill locations still load normally.
+- Prompt model selection now honors Pi scoped model restrictions when a session has scoped models configured.
+
+### Fixed
+- Added support for Pi's `max` thinking level in prompt frontmatter and rotation lists.
+- `run-prompt` now throws tool errors for invalid command state or input instead of returning `isError` results.
+- Delegated prompt cancellation now installs terminal input hooks only in TUI mode.
+
 ## [0.10.0] - 2026-07-01
 
 ### Changed
