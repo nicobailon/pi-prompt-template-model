@@ -22,6 +22,14 @@ export interface RegistryLike {
 	}>;
 }
 
+export interface ScopedModelLike {
+	model: Model<any>;
+}
+
+export interface ModelSelectionOptions {
+	scopedModels?: readonly ScopedModelLike[];
+}
+
 function isSameModel(a: Model<any>, b: Model<any>): boolean {
 	return a.provider === b.provider && a.id === b.id;
 }
@@ -62,7 +70,20 @@ function orderMatchesByProviderPreference(models: Model<any>[]): Model<any>[] {
 	return prioritized;
 }
 
-function getModelCandidates(modelSpec: string, registry: Pick<RegistryLike, "find" | "getAll">): Model<any>[] {
+function getScopedModels(options?: ModelSelectionOptions): Model<any>[] | undefined {
+	const scopedModels = options?.scopedModels?.map((entry) => entry.model) ?? [];
+	return scopedModels.length > 0 ? scopedModels : undefined;
+}
+
+function isInScope(model: Model<any>, scopedModels: Model<any>[] | undefined): boolean {
+	return !scopedModels || scopedModels.some((candidate) => isSameModel(candidate, model));
+}
+
+function getModelCandidates(
+	modelSpec: string,
+	registry: Pick<RegistryLike, "find" | "getAll">,
+	scopedModels: Model<any>[] | undefined,
+): Model<any>[] {
 	const slashIndex = modelSpec.indexOf("/");
 
 	if (slashIndex !== -1) {
@@ -71,15 +92,17 @@ function getModelCandidates(modelSpec: string, registry: Pick<RegistryLike, "fin
 		if (!provider || !modelId) return [];
 		if (modelId.split("/").some((segment) => segment.length === 0)) return [];
 		const model = registry.find(provider, modelId);
-		return model ? [model] : [];
+		return model && isInScope(model, scopedModels) ? [model] : [];
 	}
 
-	const allMatches = registry.getAll().filter((model) => model.id === modelSpec);
+	const sourceModels = scopedModels ?? registry.getAll();
+	const allMatches = sourceModels.filter((model) => model.id === modelSpec);
 	if (allMatches.length <= 1) return allMatches;
 	return orderMatchesByProviderPreference(allMatches);
 }
 
-async function hasUsableAuth(model: Model<any>, registry: RegistryLike): Promise<boolean> {
+async function hasUsableAuth(model: Model<any>, registry: RegistryLike, scopedModels: Model<any>[] | undefined): Promise<boolean> {
+	if (isInScope(model, scopedModels) && scopedModels) return true;
 	const availableMatch = registry.getAvailable().some((candidate) => isSameModel(candidate, model));
 	if (availableMatch) return true;
 	if (!registry.isUsingOAuth(model)) return false;
@@ -95,14 +118,16 @@ export async function selectModelCandidate(
 	modelSpecs: string[],
 	currentModel: Model<any> | undefined,
 	registry: RegistryLike,
+	options?: ModelSelectionOptions,
 ): Promise<SelectedModelCandidate | undefined> {
-	if (currentModel && modelSpecs.some((spec) => modelSpecMatches(spec, currentModel))) {
+	const scopedModels = getScopedModels(options);
+	if (currentModel && isInScope(currentModel, scopedModels) && modelSpecs.some((spec) => modelSpecMatches(spec, currentModel))) {
 		return { model: currentModel, alreadyActive: true };
 	}
 
 	for (const spec of modelSpecs) {
-		for (const model of getModelCandidates(spec, registry)) {
-			if (await hasUsableAuth(model, registry)) {
+		for (const model of getModelCandidates(spec, registry, scopedModels)) {
+			if (await hasUsableAuth(model, registry, scopedModels)) {
 				return { model, alreadyActive: false };
 			}
 		}

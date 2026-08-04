@@ -49,6 +49,9 @@ function createCtx(cwd: string) {
 	const model = { provider: "anthropic", id: "claude-sonnet-4-20250514" };
 	return {
 		cwd,
+		mode: "print",
+		scopedModels: [],
+		isProjectTrusted() { return true; },
 		hasUI: false,
 		model,
 		modelRegistry: {
@@ -96,6 +99,7 @@ function createCtx(cwd: string) {
 
 function createInteractiveCtx(cwd: string) {
 	const ctx = createCtx(cwd);
+	ctx.mode = "tui";
 	ctx.hasUI = true;
 	let terminalHandler: ((input: string) => { consume?: boolean; data?: string } | undefined) | undefined;
 	ctx.ui.onTerminalInput = (handler: (input: string) => { consume?: boolean; data?: string } | undefined) => {

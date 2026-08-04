@@ -110,6 +110,9 @@ function createContext(cwd: string, pi: FakePi) {
 	return {
 		ctx: {
 			cwd,
+			mode: "print",
+			scopedModels: [],
+			isProjectTrusted() { return true; },
 			hasUI: false,
 			model: MODEL,
 			modelRegistry: {

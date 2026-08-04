@@ -174,3 +174,20 @@ test("selectModelCandidate prioritizes openai-codex for ambiguous bare ids", asy
 	const selected = await selectModelCandidate(["gpt-5.2"], undefined, registry as never);
 	assert.deepEqual(selected?.model, models[1]);
 });
+
+test("selectModelCandidate restricts prompt models to scoped models when present", async () => {
+	const models = [
+		{ provider: "anthropic", id: "claude-sonnet-4-20250514" },
+		{ provider: "openrouter", id: "claude-sonnet-4-20250514" },
+	];
+	const registry = createRegistry(models, models);
+	const selected = await selectModelCandidate(
+		["claude-sonnet-4-20250514"],
+		models[0] as never,
+		registry as never,
+		{ scopedModels: [{ model: models[1] as never }] },
+	);
+
+	assert.equal(selected?.alreadyActive, false);
+	assert.deepEqual(selected?.model, models[1]);
+});

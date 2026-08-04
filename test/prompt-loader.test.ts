@@ -45,6 +45,21 @@ test("loadPromptsWithModel lets project prompts override user prompts", () => {
 	});
 });
 
+test("loadPromptsWithModel skips project prompts when project trust is disabled", () => {
+	withTempHome((root) => {
+		const cwd = join(root, "project");
+		mkdirSync(join(root, ".pi", "agent", "prompts"), { recursive: true });
+		mkdirSync(join(cwd, ".pi", "prompts"), { recursive: true });
+		writeFileSync(join(root, ".pi", "agent", "prompts", "same.md"), '---\nmodel: claude-sonnet-4-20250514\n---\nuser');
+		writeFileSync(join(cwd, ".pi", "settings.json"), JSON.stringify({ prompts: ["prompts"] }));
+		writeFileSync(join(cwd, ".pi", "prompts", "same.md"), '---\nmodel: claude-sonnet-4-20250514\n---\nproject');
+
+		const result = loadPromptsWithModel(cwd, false, { includeProjectPrompts: false });
+		assert.equal(result.prompts.get("same")?.source, "user");
+		assert.equal(result.prompts.get("same")?.content, "user");
+	});
+});
+
 test("loadPromptsWithModel loads global settings prompt directories relative to agent dir", () => {
 	withTempHome((root) => {
 		const cwd = join(root, "project");
@@ -274,6 +289,18 @@ test("loadPromptsWithModel trims optional string frontmatter fields", () => {
 		assert.equal(result.prompts.get("trimmed")?.description, "Trim me");
 		assert.equal(result.prompts.get("trimmed")?.skill, "tmux");
 		assert.equal(result.prompts.get("trimmed")?.thinking, "high");
+	});
+});
+
+test("loadPromptsWithModel accepts max thinking level", () => {
+	withTempHome((root) => {
+		const cwd = join(root, "project");
+		mkdirSync(join(cwd, ".pi", "prompts"), { recursive: true });
+		writeFileSync(join(cwd, ".pi", "prompts", "deep.md"), '---\nmodel: claude-sonnet-4-20250514\nthinking: max\n---\nbody');
+
+		const result = loadPromptsWithModel(cwd);
+		assert.equal(result.prompts.get("deep")?.thinking, "max");
+		assert.equal(result.diagnostics.length, 0);
 	});
 });
 
@@ -1016,6 +1043,24 @@ test("resolveSkillPath searches project .pi, ancestor .agents, then global skill
 		assert.equal(resolveSkillPath("from-project", cwd), join(cwd, ".pi", "skills", "from-project.md"));
 		assert.equal(resolveSkillPath("from-agents", cwd), join(repoRoot, ".agents", "skills", "from-agents", "SKILL.md"));
 		assert.equal(resolveSkillPath("from-global", cwd), join(root, ".pi", "agent", "skills", "from-global", "SKILL.md"));
+	});
+});
+
+test("resolveSkillPath skips project skills when project trust is disabled", () => {
+	withTempHome((root) => {
+		const repoRoot = join(root, "repo");
+		const cwd = join(repoRoot, "apps", "web");
+		mkdirSync(join(repoRoot, ".git"), { recursive: true });
+		mkdirSync(join(repoRoot, ".agents", "skills", "from-agents"), { recursive: true });
+		mkdirSync(join(cwd, ".pi", "skills"), { recursive: true });
+		mkdirSync(join(root, ".pi", "agent", "skills", "from-global"), { recursive: true });
+		writeFileSync(join(repoRoot, ".agents", "skills", "from-agents", "SKILL.md"), "agents skill");
+		writeFileSync(join(cwd, ".pi", "skills", "from-project.md"), "project skill");
+		writeFileSync(join(root, ".pi", "agent", "skills", "from-global", "SKILL.md"), "global skill");
+
+		assert.equal(resolveSkillPath("from-project", cwd, { includeProjectSkills: false }), undefined);
+		assert.equal(resolveSkillPath("from-agents", cwd, { includeProjectSkills: false }), undefined);
+		assert.equal(resolveSkillPath("from-global", cwd, { includeProjectSkills: false }), join(root, ".pi", "agent", "skills", "from-global", "SKILL.md"));
 	});
 });
 

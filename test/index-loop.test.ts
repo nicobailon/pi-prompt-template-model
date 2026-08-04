@@ -153,6 +153,9 @@ function createContext(
 
 	const ctx = {
 		cwd,
+		mode: "tui",
+		scopedModels: [],
+		isProjectTrusted() { return true; },
 		get model() {
 			return pi.currentModel;
 		},
@@ -282,6 +285,9 @@ function createBranchingContext(
 
 	const ctx = {
 		cwd,
+		mode: "print",
+		scopedModels: [],
+		isProjectTrusted() { return true; },
 		get model() {
 			return pi.currentModel;
 		},

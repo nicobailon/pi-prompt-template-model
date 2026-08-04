@@ -3,10 +3,11 @@ import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { minimatch } from "minimatch";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
-import { CONFIG_DIR_NAME, getAgentDir, parseFrontmatter } from "@earendil-works/pi-coding-agent";
+import { getAgentDir, parseFrontmatter } from "@earendil-works/pi-coding-agent";
 import { parseChainDeclaration } from "./chain-parser.ts";
 
-const VALID_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
+const CONFIG_DIR_NAME = ".pi";
+const VALID_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 export const RESERVED_COMMAND_NAMES = new Set([
 	"chain-prompts",
 	"prompt-tool",
@@ -101,6 +102,14 @@ export interface PromptLoaderDiagnostic {
 export interface LoadPromptsWithModelResult {
 	prompts: Map<string, PromptWithModel>;
 	diagnostics: PromptLoaderDiagnostic[];
+}
+
+export interface LoadPromptsWithModelOptions {
+	includeProjectPrompts?: boolean;
+}
+
+export interface ResolveSkillPathOptions {
+	includeProjectSkills?: boolean;
 }
 
 function createDiagnostic(
@@ -2053,7 +2062,11 @@ function loadPromptsWithModelFromConfiguredPath(
 	return loadPromptsWithModelFromDir(dirname(resolvedPath), source, includePlainPrompts, "", new Set<string>(), basename(resolvedPath), seenFiles, shouldLoadFile);
 }
 
-export function loadPromptsWithModel(cwd: string, includePlainPrompts = false): LoadPromptsWithModelResult {
+export function loadPromptsWithModel(
+	cwd: string,
+	includePlainPrompts = false,
+	options: LoadPromptsWithModelOptions = {},
+): LoadPromptsWithModelResult {
 	const agentDir = getAgentDir();
 	const globalDir = join(agentDir, "prompts");
 	const projectBaseDir = resolve(cwd, CONFIG_DIR_NAME);
@@ -2088,15 +2101,20 @@ export function loadPromptsWithModel(cwd: string, includePlainPrompts = false): 
 		}
 	}
 
-	const projectSettingsPaths = loadConfiguredPromptPaths(join(projectBaseDir, "settings.json"), "project", projectBaseDir, diagnostics);
+	const includeProjectPrompts = options.includeProjectPrompts !== false;
+	const projectSettingsPaths = includeProjectPrompts
+		? loadConfiguredPromptPaths(join(projectBaseDir, "settings.json"), "project", projectBaseDir, diagnostics)
+		: { paths: [], patterns: [] };
 	const globalSettingsPaths = loadConfiguredPromptPaths(join(agentDir, "settings.json"), "user", agentDir, diagnostics);
 	const projectDefaultFilter = createPromptFileFilter(projectSettingsPaths.patterns.filter(isSettingsPromptOverridePattern), projectBaseDir);
 	const globalDefaultFilter = createPromptFileFilter(globalSettingsPaths.patterns.filter(isSettingsPromptOverridePattern), agentDir);
 
-	for (const configuredPath of projectSettingsPaths.paths) {
-		addResult(loadPromptsWithModelFromConfiguredPath(configuredPath, includePlainPrompts, seenPromptFiles));
+	if (includeProjectPrompts) {
+		for (const configuredPath of projectSettingsPaths.paths) {
+			addResult(loadPromptsWithModelFromConfiguredPath(configuredPath, includePlainPrompts, seenPromptFiles));
+		}
+		addResult(loadPromptsWithModelFromDir(projectDir, "project", includePlainPrompts, "", new Set<string>(), undefined, seenPromptFiles, projectDefaultFilter));
 	}
-	addResult(loadPromptsWithModelFromDir(projectDir, "project", includePlainPrompts, "", new Set<string>(), undefined, seenPromptFiles, projectDefaultFilter));
 	for (const configuredPath of globalSettingsPaths.paths) {
 		addResult(loadPromptsWithModelFromConfiguredPath(configuredPath, includePlainPrompts, seenPromptFiles));
 	}
@@ -2168,16 +2186,22 @@ function findFirstExisting(paths: string[]): string | undefined {
 	return undefined;
 }
 
-export function resolveSkillPath(skillName: string, cwd: string): string | undefined {
+export function resolveSkillPath(
+	skillName: string,
+	cwd: string,
+	options: ResolveSkillPathOptions = {},
+): string | undefined {
 	const projectDir = resolve(cwd);
 
-	const projectPiSkill = findFirstExisting(getSkillCandidates(resolve(projectDir, CONFIG_DIR_NAME, "skills"), skillName));
-	if (projectPiSkill) return projectPiSkill;
+	if (options.includeProjectSkills !== false) {
+		const projectPiSkill = findFirstExisting(getSkillCandidates(resolve(projectDir, CONFIG_DIR_NAME, "skills"), skillName));
+		if (projectPiSkill) return projectPiSkill;
 
-	const repoRoot = findRepoRoot(projectDir);
-	for (const dir of walkAncestors(projectDir, repoRoot)) {
-		const projectAgentsSkill = findFirstExisting(getSkillCandidates(join(dir, ".agents", "skills"), skillName));
-		if (projectAgentsSkill) return projectAgentsSkill;
+		const repoRoot = findRepoRoot(projectDir);
+		for (const dir of walkAncestors(projectDir, repoRoot)) {
+			const projectAgentsSkill = findFirstExisting(getSkillCandidates(join(dir, ".agents", "skills"), skillName));
+			if (projectAgentsSkill) return projectAgentsSkill;
+		}
 	}
 
 	const globalPiSkill = findFirstExisting(getSkillCandidates(join(getAgentDir(), "skills"), skillName));

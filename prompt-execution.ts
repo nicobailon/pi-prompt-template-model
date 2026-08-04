@@ -1,6 +1,6 @@
 import type { Model } from "@earendil-works/pi-ai";
 import { substituteArgs } from "./args.ts";
-import { getResolvedModelRef, selectModelCandidate, type RegistryLike, type SelectedModelCandidate } from "./model-selection.ts";
+import { getResolvedModelRef, selectModelCandidate, type ModelSelectionOptions, type RegistryLike, type SelectedModelCandidate } from "./model-selection.ts";
 import type { PromptWithModel } from "./prompt-loader.ts";
 import { renderTemplateConditionals } from "./template-conditionals.ts";
 
@@ -15,7 +15,7 @@ export interface EmptyPromptAbort {
 	warning?: string;
 }
 
-interface PromptExecutionOptions {
+interface PromptExecutionOptions extends ModelSelectionOptions {
 	inheritedModel?: Model<any>;
 }
 
@@ -71,7 +71,7 @@ export async function preparePromptExecution(
 					alreadyActive: sameModel(currentModel, inheritedModel),
 				};
 			})()
-			: await selectModelCandidate(prompt.models, currentModel, modelRegistry);
+			: await selectModelCandidate(prompt.models, currentModel, modelRegistry, options);
 	if (!selectedModel) return undefined;
 	if ("message" in selectedModel) return selectedModel;
 
