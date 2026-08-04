@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-08-04
+
 ### Changed
 - Added ordered multi-skill support to the `skill` frontmatter field for inline and delegated prompts, including comma-separated and YAML array forms, atomic resolution, full inline context injection, and name/path-only delegated request metadata. Thanks @RotarySC for #13 and @chrisgoddard for the delegated protocol metadata ideas in #12.
 - Updated local Pi development dependencies to `@earendil-works/*` `^0.83.0` while keeping package installs on peer dependencies.
