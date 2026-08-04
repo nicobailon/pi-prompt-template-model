@@ -69,7 +69,7 @@ export interface PromptWithModel {
 	chain?: string;
 	chainContext?: "summary";
 	restore: boolean;
-	skill?: string;
+	skill?: string[];
 	thinking?: ThinkingLevel;
 	thinkingLevels?: ThinkingLevel[];
 	rotate?: boolean;
@@ -155,6 +155,40 @@ function normalizeStringField(
 
 	const normalized = value.trim();
 	return normalized.length > 0 ? normalized : undefined;
+}
+
+function normalizeSkillNames(
+	value: unknown,
+	filePath: string,
+	source: PromptSource,
+	diagnostics: PromptLoaderDiagnostic[],
+): string[] | undefined {
+	if (value === undefined) return undefined;
+	const entries = typeof value === "string" ? [value] : value;
+	if (!Array.isArray(entries) || entries.some((entry) => typeof entry !== "string")) {
+		diagnostics.push(
+			createDiagnostic(
+				"invalid-skill",
+				filePath,
+				source,
+				`Ignoring invalid skill value in ${filePath}: expected a string or an array of strings.`,
+			),
+		);
+		return undefined;
+	}
+
+	const skills: string[] = [];
+	const seen = new Set<string>();
+	for (const entry of entries) {
+		for (const item of entry.split(",")) {
+			const trimmed = item.trim();
+			const normalized = (trimmed.startsWith("skill:") ? trimmed.slice("skill:".length) : trimmed).trim();
+			if (!normalized || seen.has(normalized)) continue;
+			seen.add(normalized);
+			skills.push(normalized);
+		}
+	}
+	return skills.length > 0 ? skills : undefined;
 }
 
 function isValidModelSelectionSpec(spec: string): boolean {
@@ -1863,7 +1897,7 @@ function loadPromptsWithModelFromDir(
 				const safeInheritContext = subagent !== undefined && inheritContext;
 				const safeCwd = (chain || subagent !== undefined || hasLineup) ? cwd : undefined;
 				const description = normalizeStringField("description", frontmatter.description, fullPath, source, diagnostics) ?? "";
-				const skill = chain ? undefined : normalizeStringField("skill", frontmatter.skill, fullPath, source, diagnostics);
+				const skill = chain ? undefined : normalizeSkillNames(frontmatter.skill, fullPath, source, diagnostics);
 				let thinking: ThinkingLevel | undefined;
 				let thinkingLevels: ThinkingLevel[] | undefined;
 				if (!chain) {
@@ -2138,7 +2172,7 @@ export function buildPromptCommandDescription(prompt: PromptWithModel): string {
 	}
 	const modelLabel = prompt.models.length > 0 ? prompt.models.map((model) => model.split("/").pop() || model).join("|") : "current";
 	const rotateLabel = prompt.rotate ? " rotate" : "";
-	const skillLabel = prompt.skill ? ` +${prompt.skill}` : "";
+	const skillLabel = prompt.skill ? ` +${prompt.skill.join(",")}` : "";
 	const thinkingValue = prompt.thinkingLevels ? prompt.thinkingLevels.join(",") : prompt.thinking;
 	const thinkingLabel = thinkingValue ? ` ${thinkingValue}` : "";
 	const loopLabel = prompt.loop !== undefined ? ` loop:${prompt.loop === null ? "unlimited" : prompt.loop}` : "";

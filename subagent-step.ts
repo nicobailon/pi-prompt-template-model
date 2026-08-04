@@ -19,6 +19,7 @@ import {
 	PROMPT_TEMPLATE_SUBAGENT_STARTED_EVENT,
 	PROMPT_TEMPLATE_SUBAGENT_UPDATE_EVENT,
 	updateDelegatedLiveState,
+	type DelegatedSkillBinding,
 	type DelegatedSubagentParallelResult,
 	type DelegatedSubagentRequest,
 	type DelegatedSubagentResponse,
@@ -39,6 +40,7 @@ interface DelegatedPromptBaseOptions {
 	taskPreamble?: string;
 	worktree?: boolean;
 	allowPartialFailures?: boolean;
+	resolveSkillBindings?: (skillNames: string[], cwd: string) => DelegatedSkillBinding[];
 }
 
 interface DelegatedSinglePromptOptions extends DelegatedPromptBaseOptions {
@@ -157,6 +159,7 @@ interface PreparedDelegatedTask {
 	task: string;
 	context: "fresh" | "fork";
 	model: string;
+	skills?: DelegatedSkillBinding[];
 	cwd: string;
 }
 
@@ -167,6 +170,7 @@ async function prepareDelegatedTask(
 	override: SubagentOverride | undefined,
 	inheritedModel: Model<any> | undefined,
 	taskPreamble: string | undefined,
+	resolveSkillBindings: DelegatedPromptBaseOptions["resolveSkillBindings"],
 ): Promise<PreparedDelegatedTask> {
 	const requestedAgent = resolveDelegationName(task.prompt, override);
 	if (!requestedAgent) {
@@ -177,6 +181,13 @@ async function prepareDelegatedTask(
 		throw new Error(`cwd directory does not exist: ${effectiveCwd}`);
 	}
 	const agent = requestedAgent;
+	const skills = task.prompt.skill;
+	const skillBindings = skills?.length
+		? resolveSkillBindings?.(skills, effectiveCwd)
+		: undefined;
+	if (skills?.length && !resolveSkillBindings) {
+		throw new Error(`Prompt \`${task.prompt.name}\` cannot resolve delegated skills.`);
+	}
 	const prepared = await preparePromptExecution(
 		task.prompt,
 		task.args,
@@ -208,6 +219,7 @@ async function prepareDelegatedTask(
 		task: taskText,
 		context: task.prompt.inheritContext ? "fork" : "fresh",
 		model: `${prepared.selectedModel.model.provider}/${prepared.selectedModel.model.id}`,
+		skills: skillBindings,
 		cwd: effectiveCwd,
 	};
 }
@@ -535,7 +547,7 @@ async function requestDelegatedRun(
 }
 
 export async function executeSubagentPromptStep(options: DelegatedPromptOptions): Promise<DelegatedPromptOutcome | undefined> {
-	const { pi, ctx, currentModel, override, signal, inheritedModel, taskPreamble, allowPartialFailures } = options;
+	const { pi, ctx, currentModel, override, signal, inheritedModel, taskPreamble, allowPartialFailures, resolveSkillBindings } = options;
 	const isParallelRequest = "parallel" in options;
 
 	const tasks = isParallelRequest
@@ -545,7 +557,7 @@ export async function executeSubagentPromptStep(options: DelegatedPromptOptions)
 
 	const preparedTasks: PreparedDelegatedTask[] = [];
 	for (const task of tasks) {
-		const preparedTask = await prepareDelegatedTask(task, ctx, currentModel, override, inheritedModel, taskPreamble);
+		const preparedTask = await prepareDelegatedTask(task, ctx, currentModel, override, inheritedModel, taskPreamble, resolveSkillBindings);
 		preparedTasks.push(preparedTask);
 	}
 
@@ -570,17 +582,21 @@ export async function executeSubagentPromptStep(options: DelegatedPromptOptions)
 					agent: task.agent,
 					task: task.task,
 					model: task.model,
+					...(task.skills ? { skills: task.skills } : {}),
 					cwd: task.cwd,
 				})),
 			}
 			: {}),
 		context: requestContext,
 		model: preparedTasks[0]!.model,
+		...(preparedTasks[0]!.skills ? { skills: preparedTasks[0]!.skills } : {}),
 		cwd: requestCwd,
 		...(options.worktree ? { worktree: true } : {}),
 	};
 
 	const promptLabel = preparedTasks.map((task) => task.promptName).join(", ");
+	const skillNames = [...new Set(preparedTasks.flatMap((task) => task.skills?.map((skill) => skill.name) ?? []))];
+	const skillLabel = skillNames.length > 0 ? ` with skills ${skillNames.map((name) => `\`${name}\``).join(", ")}` : "";
 	const statusLabel = isParallelRequest ? `parallel(${preparedTasks.length})` : preparedTasks[0]!.agent;
 	if (ctx.hasUI) {
 		ctx.ui.setStatus("prompt-subagent", `delegating to ${statusLabel}`);
@@ -589,8 +605,8 @@ export async function executeSubagentPromptStep(options: DelegatedPromptOptions)
 	notify(
 		ctx,
 		isParallelRequest
-			? `Delegating parallel prompts (${promptLabel})`
-			: `Delegating prompt \`${preparedTasks[0]!.promptName}\` to subagent \`${preparedTasks[0]!.agent}\``,
+			? `Delegating parallel prompts (${promptLabel})${skillLabel}`
+			: `Delegating prompt \`${preparedTasks[0]!.promptName}\` to subagent \`${preparedTasks[0]!.agent}\`${skillLabel}`,
 		"info",
 	);
 

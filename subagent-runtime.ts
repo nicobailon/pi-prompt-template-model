@@ -6,10 +6,16 @@ export const PROMPT_TEMPLATE_SUBAGENT_CANCEL_EVENT = "prompt-template:subagent:c
 export const PROMPT_TEMPLATE_SUBAGENT_MESSAGE_TYPE = "prompt-template-subagent";
 export const DEFAULT_SUBAGENT_NAME = "delegate";
 
+export interface DelegatedSkillBinding {
+	name: string;
+	path: string;
+}
+
 export interface DelegatedSubagentTask {
 	agent: string;
 	task: string;
 	model?: string;
+	skills?: DelegatedSkillBinding[];
 	cwd?: string;
 }
 
@@ -27,6 +33,7 @@ export interface DelegatedSubagentRequest {
 	tasks?: DelegatedSubagentTask[];
 	context: "fresh" | "fork";
 	model: string;
+	skills?: DelegatedSkillBinding[];
 	cwd: string;
 	worktree?: boolean;
 }

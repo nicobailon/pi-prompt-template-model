@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Changed
+- Added ordered multi-skill support to the `skill` frontmatter field for inline and delegated prompts, including comma-separated and YAML array forms, atomic resolution, full inline context injection, and name/path-only delegated request metadata. Thanks @RotarySC for #13 and @chrisgoddard for the delegated protocol metadata ideas in #12.
 - Updated local Pi development dependencies to `@earendil-works/*` `^0.83.0` while keeping package installs on peer dependencies.
 - Project-local prompt and skill discovery now respects Pi project trust; global prompt and skill locations still load normally.
 - Prompt model selection now honors Pi scoped model restrictions when a session has scoped models configured.

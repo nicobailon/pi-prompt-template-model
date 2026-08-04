@@ -71,7 +71,7 @@ All fields are optional. Templates that don't use any extension features (no `mo
 | Field | Default | What it does |
 |-------|---------|--------------|
 | `model` | current session model | Which model to use. Accepts a single model, a `provider/model-id` pair, or a comma-separated fallback list (see [Model Format](#model-format)). Ignored when `chain` is set. |
-| `skill` | — | Injects a skill's content as a context message before the agent handles your task. No extra round-trip — the agent gets the expertise immediately. See [Skill Resolution](#skill-resolution). |
+| `skill` | — | Loads one or more skills. Accepts one name, comma-separated names, or a YAML array; each entry may use the optional `skill:` prefix. Inline runs inject the full content before the agent turn, while delegated runs bind resolved name/path metadata to the outbound request. See [Skill Resolution](#skill-resolution). |
 | `thinking` | — | Thinking level for the model: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. |
 | `description` | — | Short text shown next to the command in autocomplete. |
 | `chain` | — | Declares a reusable pipeline of templates (`step -> step`). When set, the body is ignored. See [Chain Templates](#chain-templates). |
@@ -152,15 +152,18 @@ skill: surf
 $@
 ```
 
-The skill content is injected as a context message before the agent processes your task. No decision-making, no tool call — immediate expertise. If the skill file can't be found, the command fails fast instead of running without it.
+For inline runs, every skill is resolved first and its full content is injected in a separate `<skill name="...">` block within one context message before the agent processes your task. For delegated runs, skill bodies are not prepended to the task; the outbound request carries each resolved name and path instead. If any declared skill can't be found or read, the command fails before the inline turn or delegated request starts.
 
 ### Skill Resolution
 
-The `skill` field accepts a bare name or a `skill:` prefix:
+The `skill` field accepts one name, comma-separated names, or a YAML array. Entries are trimmed, empty entries are dropped, duplicates keep their first position, and each entry may use a `skill:` prefix:
 
 ```yaml
 skill: tmux
-skill: skill:tmux    # equivalent
+skill: tmux, skill:browser
+skill:
+  - tmux
+  - skill:browser
 ```
 
 Resolution order:
@@ -243,7 +246,7 @@ inheritContext: true
 Audit this diff for correctness and edge cases: $@
 ```
 
-`inheritContext: true` forks the current conversation so the subagent has full context. Without it, the subagent starts fresh.
+`inheritContext: true` forks the current conversation so the subagent has full context. Without it, the subagent starts fresh. Declared skills are resolved against the delegated `cwd` and attached to request metadata as names and paths; their bodies are never prepended to delegated task text.
 
 To force a subagent into a specific working directory, add `cwd`:
 

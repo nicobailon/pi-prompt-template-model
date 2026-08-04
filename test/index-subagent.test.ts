@@ -242,6 +242,61 @@ test("delegated prompts honor default agent, runtime override, and inheritContex
 	});
 });
 
+test("delegated prompts bind resolved skills as name/path metadata without changing task text", async () => {
+	await withTempHome(async (root) => {
+		const cwd = join(root, "host");
+		const delegatedCwd = join(root, "delegated");
+		mkdirSync(join(cwd, ".pi", "prompts"), { recursive: true });
+		mkdirSync(join(delegatedCwd, ".pi", "skills", "audit"), { recursive: true });
+		mkdirSync(join(root, ".pi", "agent", "skills", "tmux"), { recursive: true });
+		writeFileSync(join(delegatedCwd, ".pi", "skills", "audit", "SKILL.md"), "---\nname: audit\n---\nDelegated audit body.");
+		writeFileSync(join(root, ".pi", "agent", "skills", "tmux", "SKILL.md"), "---\nname: tmux\n---\nDelegated tmux body.");
+		writeFileSync(
+			join(cwd, ".pi", "prompts", "simplify.md"),
+			`---\nmodel: anthropic/claude-sonnet-4-20250514\nsubagent: true\ncwd: ${delegatedCwd}\nskill: tmux, audit\n---\ndo work`,
+		);
+
+		const pi = new FakePi();
+		const { ctx } = createContext(cwd, pi);
+		promptModelExtension(pi as never);
+		await pi.emit("session_start", {}, ctx);
+		respondWithDelegatedResult(pi, (request) => {
+			assert.equal(request.task, "do work");
+			assert.doesNotMatch(request.task, /Delegated (tmux|audit) body/);
+			assert.deepEqual(request.skills, [
+				{ name: "tmux", path: join(root, ".pi", "agent", "skills", "tmux", "SKILL.md") },
+				{ name: "audit", path: join(delegatedCwd, ".pi", "skills", "audit", "SKILL.md") },
+			]);
+		});
+
+		await pi.commands.get("simplify")!.handler("", ctx);
+	});
+});
+
+test("delegated prompt skill resolution fails before emitting a request", async () => {
+	await withTempHome(async (root) => {
+		const cwd = join(root, "project");
+		mkdirSync(join(cwd, ".pi", "prompts"), { recursive: true });
+		mkdirSync(join(root, ".pi", "agent", "skills", "tmux"), { recursive: true });
+		writeFileSync(join(root, ".pi", "agent", "skills", "tmux", "SKILL.md"), "---\nname: tmux\n---\nUse tmux.");
+		writeFileSync(
+			join(cwd, ".pi", "prompts", "simplify.md"),
+			"---\nmodel: anthropic/claude-sonnet-4-20250514\nsubagent: true\nskill: tmux, missing\n---\ndo work",
+		);
+
+		const pi = new FakePi();
+		const { ctx } = createContext(cwd, pi);
+		let emittedRequests = 0;
+		pi.events.on(PROMPT_TEMPLATE_SUBAGENT_REQUEST_EVENT, () => { emittedRequests++; });
+		promptModelExtension(pi as never);
+		await pi.emit("session_start", {}, ctx);
+		await pi.commands.get("simplify")!.handler("", ctx);
+
+		assert.equal(emittedRequests, 0);
+		assert.equal(pi.customMessages.length, 0);
+	});
+});
+
 test("parallel delegated prompts expand to repeated tasks with slot headers", async () => {
 	await withTempHome(async (root) => {
 		const cwd = join(root, "project");
@@ -333,16 +388,20 @@ test("parallel chain step delegates with tasks payload", async () => {
 	await withTempHome(async (root) => {
 		const cwd = join(root, "project");
 		mkdirSync(join(cwd, ".pi", "prompts"), { recursive: true });
-		writeFileSync(join(cwd, ".pi", "prompts", "pipeline.md"), '---\nchain: "parallel(scan-fe, scan-be)"\n---\nignored');
-		writeFileSync(join(cwd, ".pi", "prompts", "scan-fe.md"), "---\nmodel: anthropic/claude-sonnet-4-20250514\nsubagent: delegate\n---\nscan fe");
-		writeFileSync(join(cwd, ".pi", "prompts", "scan-be.md"), "---\nmodel: anthropic/claude-sonnet-4-20250514\nsubagent: reviewer\n---\nscan be");
+		mkdirSync(join(root, ".pi", "agent", "skills", "frontend"), { recursive: true });
+		mkdirSync(join(root, ".pi", "agent", "skills", "backend"), { recursive: true });
+		writeFileSync(join(root, ".pi", "agent", "skills", "frontend", "SKILL.md"), "Frontend skill body.");
+		writeFileSync(join(root, ".pi", "agent", "skills", "backend", "SKILL.md"), "Backend skill body.");
+		writeFileSync(join(cwd, ".pi", "prompts", "pipeline.md"), '---\nchain: "parallel(scan-fe, scan-be)"\nskill: ignored\n---\nignored');
+		writeFileSync(join(cwd, ".pi", "prompts", "scan-fe.md"), "---\nmodel: anthropic/claude-sonnet-4-20250514\nsubagent: delegate\nskill: frontend\n---\nscan fe");
+		writeFileSync(join(cwd, ".pi", "prompts", "scan-be.md"), "---\nmodel: anthropic/claude-sonnet-4-20250514\nsubagent: reviewer\nskill: backend\n---\nscan be");
 
 		const pi = new FakePi();
 		const { ctx } = createContext(cwd, pi);
 		promptModelExtension(pi as never);
 		await pi.emit("session_start", {}, ctx);
 
-		let requestTasks: Array<{ agent: string; task: string; model?: string }> | undefined;
+		let requestTasks: Array<{ agent: string; task: string; model?: string; skills?: Array<{ name: string; path: string }> }> | undefined;
 		pi.events.on(PROMPT_TEMPLATE_SUBAGENT_REQUEST_EVENT, (payload) => {
 			const request = payload as any;
 			requestTasks = request.tasks;
@@ -374,6 +433,9 @@ test("parallel chain step delegates with tasks payload", async () => {
 		assert.equal(requestTasks?.length, 2);
 		assert.equal(requestTasks?.[0]?.agent, "delegate");
 		assert.equal(requestTasks?.[1]?.agent, "reviewer");
+		assert.deepEqual(requestTasks?.[0]?.skills, [{ name: "frontend", path: join(root, ".pi", "agent", "skills", "frontend", "SKILL.md") }]);
+		assert.deepEqual(requestTasks?.[1]?.skills, [{ name: "backend", path: join(root, ".pi", "agent", "skills", "backend", "SKILL.md") }]);
+		assert.doesNotMatch(requestTasks?.map((task) => task.task).join("\n") ?? "", /skill body/i);
 		assert.equal(pi.customMessages.length, 1);
 		assert.equal(pi.userMessages.length, 1);
 		assert.equal(
@@ -551,10 +613,13 @@ test("compare prompt expands count, applies taskSuffix, and runs a final applier
 	await withTempHome(async (root) => {
 		const cwd = join(root, "project");
 		mkdirSync(join(cwd, ".pi", "prompts"), { recursive: true });
+		mkdirSync(join(root, ".pi", "agent", "skills", "audit"), { recursive: true });
+		writeFileSync(join(root, ".pi", "agent", "skills", "audit", "SKILL.md"), "Compare audit body.");
 		writeFileSync(
 			join(cwd, ".pi", "prompts", "compare.md"),
 			[
 				"---",
+				"skill: audit",
 				"bestOfN:",
 				"  workers:",
 				"    - subagent: true",
@@ -589,6 +654,9 @@ test("compare prompt expands count, applies taskSuffix, and runs a final applier
 			if (phase === 1) {
 				assert.equal(request.tasks?.length, 3);
 				assert.deepEqual(request.tasks?.map((task: any) => task.agent), ["delegate", "delegate", "delegate"]);
+				assert.deepEqual(request.tasks?.map((task: any) => task.skills), Array(3).fill([
+					{ name: "audit", path: join(root, ".pi", "agent", "skills", "audit", "SKILL.md") },
+				]));
 				assert.deepEqual(
 					request.tasks?.map((task: any) => task.model),
 					[
@@ -632,6 +700,9 @@ test("compare prompt expands count, applies taskSuffix, and runs a final applier
 
 			if (phase === 2) {
 				assert.equal(request.tasks?.length, 2);
+				assert.deepEqual(request.tasks?.map((task: any) => task.skills), Array(2).fill([
+					{ name: "audit", path: join(root, ".pi", "agent", "skills", "audit", "SKILL.md") },
+				]));
 				assert.match(request.tasks?.[0]?.task ?? "", /\[Worker outputs and worktree summaries\]/);
 				assert.match(request.tasks?.[0]?.task ?? "", /=== Worker 1 \(delegate, anthropic\/claude-sonnet-4-20250514\) ===\nw1/);
 				assert.match(request.tasks?.[0]?.task ?? "", /=== Worktree Changes ===/);
@@ -655,6 +726,8 @@ test("compare prompt expands count, applies taskSuffix, and runs a final applier
 			assert.equal(request.cwd, cwd);
 			assert.equal(request.worktree, undefined);
 			assert.equal(request.tasks, undefined);
+			assert.deepEqual(request.skills, [{ name: "audit", path: join(root, ".pi", "agent", "skills", "audit", "SKILL.md") }]);
+			assert.doesNotMatch(request.task ?? "", /Compare audit body/);
 			assert.match(request.task ?? "", /\[Worker outputs and worktree summaries\]/);
 			assert.match(request.task ?? "", /=== Worker 1 \(delegate, anthropic\/claude-sonnet-4-20250514\) ===\nw1/);
 			assert.match(request.task ?? "", /=== Worktree Changes ===/);

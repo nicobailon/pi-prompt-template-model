@@ -1736,6 +1736,57 @@ test("skill injects as before_agent_start message without mutating system prompt
 	});
 });
 
+test("multiple skills inject as separate blocks in one atomic context message", async () => {
+	await withTempHome(async (root) => {
+		const cwd = join(root, "project");
+		mkdirSync(join(cwd, ".pi", "prompts"), { recursive: true });
+		mkdirSync(join(root, ".pi", "agent", "skills", "tmux"), { recursive: true });
+		mkdirSync(join(root, ".pi", "agent", "skills", "audit"), { recursive: true });
+		writeFileSync(join(cwd, ".pi", "prompts", "deslop.md"), `---\nmodel: ${MODEL_ID}\nskill: [tmux, skill:audit]\n---\nTASK:$@`);
+		writeFileSync(join(root, ".pi", "agent", "skills", "tmux", "SKILL.md"), "---\nname: tmux\n---\nUse tmux.");
+		writeFileSync(join(root, ".pi", "agent", "skills", "audit", "SKILL.md"), "---\nname: audit\n---\nUse audit.");
+
+		const pi = new FakePi();
+		promptModelExtension(pi as never);
+		const { ctx } = createContext(cwd, pi);
+		await pi.emit("session_start", {}, ctx);
+		await pi.commands.get("deslop")!.handler("demo", ctx);
+
+		const beforeStart = await pi.emitWithResult("before_agent_start", { systemPrompt: "BASE" }, ctx);
+		const message = beforeStart?.message as {
+			content?: string;
+			details?: { skillName?: string; skills?: Array<{ skillName: string; skillPath: string }> };
+		} | undefined;
+		assert.match(message?.content ?? "", /<skill name="tmux">\nUse tmux\.\n<\/skill>\n\n<skill name="audit">\nUse audit\.\n<\/skill>/);
+		assert.equal(message?.details?.skillName, "tmux");
+		assert.deepEqual(message?.details?.skills?.map((skill) => skill.skillName), ["tmux", "audit"]);
+	});
+});
+
+test("multiple skill resolution aborts atomically when a later skill is missing", async () => {
+	await withTempHome(async (root) => {
+		const cwd = join(root, "project");
+		mkdirSync(join(cwd, ".pi", "prompts"), { recursive: true });
+		mkdirSync(join(root, ".pi", "agent", "skills", "tmux"), { recursive: true });
+		writeFileSync(join(cwd, ".pi", "prompts", "deslop.md"), "---\nmodel: anthropic/target-model\nskill: tmux, missing-skill\n---\nTASK:$@");
+		writeFileSync(join(root, ".pi", "agent", "skills", "tmux", "SKILL.md"), "---\nname: tmux\n---\nUse tmux.");
+
+		const baseModel = { provider: "anthropic", id: "base-model" };
+		const targetModel = { provider: "anthropic", id: "target-model" };
+		const pi = new FakePi();
+		pi.currentModel = baseModel;
+		promptModelExtension(pi as never);
+		const { ctx, getNotifications } = createContext(cwd, pi, [baseModel, targetModel]);
+		await pi.emit("session_start", {}, ctx);
+		await pi.commands.get("deslop")!.handler("demo", ctx);
+
+		assert.deepEqual(pi.setModelCalls, []);
+		assert.deepEqual(pi.userMessages, []);
+		assert.equal(await pi.emitWithResult("before_agent_start", { systemPrompt: "BASE" }, ctx), undefined);
+		assert.match(getNotifications().join("\n"), /Skill "missing-skill" not found/);
+	});
+});
+
 test("skill resolves from registered skill commands and supports skill: prefix", async () => {
 	await withTempHome(async (root) => {
 		const cwd = join(root, "project");
@@ -1802,6 +1853,7 @@ test("skill path traversal names are rejected", async () => {
 		writeFileSync(join(cwd, ".pi", "SKILL.md"), "Unexpected traversal target");
 
 		const pi = new FakePi();
+		pi.skillCommands = [{ name: "skill:..", source: "skill", sourceInfo: { path: join(cwd, ".pi", "SKILL.md") } }];
 		promptModelExtension(pi as never);
 		const { ctx, getNotifications } = createContext(cwd, pi);
 		await pi.emit("session_start", {}, ctx);
