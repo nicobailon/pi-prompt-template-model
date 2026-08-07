@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
 import type { Model } from "@earendil-works/pi-ai";
