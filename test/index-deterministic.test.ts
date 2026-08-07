@@ -8,6 +8,11 @@ import {
 	PROMPT_TEMPLATE_DETERMINISTIC_COMPLETION_MESSAGE_TYPE,
 	PROMPT_TEMPLATE_DETERMINISTIC_MESSAGE_TYPE,
 } from "../deterministic-step.ts";
+import {
+	PROMPT_TEMPLATE_PROMPT_FINISHED_EVENT,
+	PROMPT_TEMPLATE_PROMPT_STARTED_EVENT,
+	PROMPT_TEMPLATE_PROMPT_PROTOCOL_VERSION,
+} from "../subagent-runtime.ts";
 
 const MODEL = { provider: "anthropic", id: "claude-sonnet-4-20250514" };
 
@@ -24,6 +29,18 @@ class FakePi {
 	userMessages: string[] = [];
 	customMessages: any[] = [];
 	setModelCalls: string[] = [];
+	bus = new Map<string, Array<(data: unknown) => void>>();
+	events = {
+		emit: (channel: string, data: unknown) => {
+			for (const handler of this.bus.get(channel) ?? []) handler(data);
+		},
+		on: (channel: string, handler: (data: unknown) => void) => {
+			const handlers = this.bus.get(channel) ?? [];
+			handlers.push(handler);
+			this.bus.set(channel, handlers);
+			return () => {};
+		},
+	};
 
 	registerMessageRenderer() {}
 	registerCommand(name: string, command: FakeCommand) { this.commands.set(name, command); }
@@ -105,6 +122,9 @@ test("deterministic prompt with handoff never emits the result card and a synthe
 
 		const pi = new FakePi();
 		const ctx = createContext(cwd, pi);
+		const lifecycle: Array<{ channel: string; data: any }> = [];
+		pi.events.on(PROMPT_TEMPLATE_PROMPT_STARTED_EVENT, (data) => lifecycle.push({ channel: PROMPT_TEMPLATE_PROMPT_STARTED_EVENT, data }));
+		pi.events.on(PROMPT_TEMPLATE_PROMPT_FINISHED_EVENT, (data) => lifecycle.push({ channel: PROMPT_TEMPLATE_PROMPT_FINISHED_EVENT, data }));
 		promptModelExtension(pi as never);
 		await pi.emit("session_start", {}, ctx);
 
@@ -117,6 +137,15 @@ test("deterministic prompt with handoff never emits the result card and a synthe
 		assert.match(pi.customMessages[0].details.stdout, /pushed/);
 		assert.equal(pi.customMessages[1].customType, PROMPT_TEMPLATE_DETERMINISTIC_COMPLETION_MESSAGE_TYPE);
 		assert.equal(pi.customMessages[1].details.status, "succeeded");
+		assert.equal(lifecycle.length, 2);
+		assert.equal(lifecycle[0]!.channel, PROMPT_TEMPLATE_PROMPT_STARTED_EVENT);
+		assert.equal(lifecycle[1]!.channel, PROMPT_TEMPLATE_PROMPT_FINISHED_EVENT);
+		assert.equal(lifecycle[0]!.data.protocolVersion, PROMPT_TEMPLATE_PROMPT_PROTOCOL_VERSION);
+		assert.equal(lifecycle[1]!.data.protocolVersion, PROMPT_TEMPLATE_PROMPT_PROTOCOL_VERSION);
+		assert.equal(lifecycle[0]!.data.runId, lifecycle[1]!.data.runId);
+		assert.equal(lifecycle[1]!.data.name, "push");
+		assert.equal(lifecycle[1]!.data.status, "completed");
+		assert.equal(lifecycle[1]!.data.changed, false);
 	});
 });
 

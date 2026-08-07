@@ -16,7 +16,7 @@ import {
 	type SubagentOverride,
 } from "./args.ts";
 import { parseChainSteps, parseChainDeclaration, type ChainStep, type ChainStepOrParallel, type ParallelChainStep } from "./chain-parser.ts";
-import { generateBoomerangSummary, generateChainStepSummary, generateIterationSummary, didIterationMakeChanges, getIterationEntries, wasIterationAborted } from "./loop-utils.ts";
+import { generateBoomerangSummary, generateChainStepSummary, generateIterationSummary, didIterationMakeChanges, getIterationEntries, getLastAssistantText, wasIterationAborted } from "./loop-utils.ts";
 import { selectModelCandidate } from "./model-selection.ts";
 import { notify, summarizePromptDiagnostics, diagnosticsFingerprint } from "./notifications.ts";
 import { preparePromptExecution, renderPromptForResolvedModel } from "./prompt-execution.ts";
@@ -32,7 +32,17 @@ import {
 import { renderSkillLoaded, type SkillLoadedDetails, type SkillLoadedSkillDetails } from "./skill-loaded-renderer.ts";
 import { createToolManager } from "./tool-manager.ts";
 import { executeSubagentPromptStep, type DelegatedPromptParallelResult } from "./subagent-step.ts";
-import { DEFAULT_SUBAGENT_NAME, PROMPT_TEMPLATE_SUBAGENT_MESSAGE_TYPE, type DelegatedSkillBinding } from "./subagent-runtime.ts";
+import {
+	DEFAULT_SUBAGENT_NAME,
+	PROMPT_TEMPLATE_PROMPT_FINISHED_EVENT,
+	PROMPT_TEMPLATE_PROMPT_PROTOCOL_VERSION,
+	PROMPT_TEMPLATE_PROMPT_STARTED_EVENT,
+	PROMPT_TEMPLATE_SUBAGENT_MESSAGE_TYPE,
+	type DelegatedSkillBinding,
+	type PromptTemplatePromptFinished,
+	type PromptTemplatePromptStarted,
+	type PromptTemplatePromptStatus,
+} from "./subagent-runtime.ts";
 import { renderDelegatedSubagentResult } from "./subagent-renderer.ts";
 import {
 	PROMPT_TEMPLATE_DETERMINISTIC_COMPLETION_MESSAGE_TYPE,
@@ -82,11 +92,24 @@ interface ExecutionErrorState {
 interface PromptStepResult {
 	changed: boolean;
 	text?: string;
+	status?: PromptTemplatePromptStatus;
 }
 
 interface PromptTurnRestore {
 	originalModel: Model<any> | undefined;
 	originalThinking: ThinkingLevel | undefined;
+}
+
+function emitPromptLifecycleEvent(
+	pi: ExtensionAPI,
+	event: typeof PROMPT_TEMPLATE_PROMPT_STARTED_EVENT | typeof PROMPT_TEMPLATE_PROMPT_FINISHED_EVENT,
+	payload: PromptTemplatePromptStarted | PromptTemplatePromptFinished,
+): void {
+	try {
+		pi.events.emit(event, payload);
+	} catch {
+		// Prompt lifecycle observers must not affect prompt execution.
+	}
 }
 
 const DEFAULT_COMPARE_REVIEWER_TASK = [
@@ -324,7 +347,7 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 							status: deterministicResult.exitCode === 0 ? "succeeded" : "failed",
 						},
 					});
-					return { changed: false };
+					return { changed: false, status: deterministicResult.exitCode === 0 ? "completed" : "failed" };
 				}
 				deterministicPreamble = deterministicPreambleText;
 			} catch (error) {
@@ -374,7 +397,7 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 				return { changed: delegated.changed, text: delegated.text };
 			} catch (error) {
 				notify(ctx, error instanceof Error ? error.message : String(error), "error");
-				return { changed: false };
+				return { changed: false, status: ctx.signal?.aborted ? "cancelled" : "failed" };
 			}
 		}
 
@@ -1038,6 +1061,7 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 		let lastDelegatedText: string | undefined;
 		let loopAborted = false;
 		let boomerangPreviousSummaries: string[] = [];
+		let runStatus: PromptTemplatePromptStatus = "completed";
 
 		try {
 			for (let i = 0; i < effectiveMax; i++) {
@@ -1087,9 +1111,11 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 					loopContext,
 				);
 				if (stepResult === "aborted") {
+					runStatus = ctx.signal?.aborted ? "cancelled" : "failed";
 					loopAborted = true;
 					break;
 				}
+				if (stepResult.status && stepResult.status !== "completed") runStatus = stepResult.status;
 				const delegatedStep = shouldDelegatePrompt(iterationPrompt, subagentOverride);
 				if (delegatedStep) {
 					lastDelegatedText = stepResult.text;
@@ -1112,6 +1138,7 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 					const result = await ctx.navigateTree(anchorId, { summarize: true });
 					freshCollapse = null;
 					if (result.cancelled) {
+						runStatus = "cancelled";
 						loopAborted = true;
 						notify(ctx, "Loop cancelled", "warning");
 						break;
@@ -1119,6 +1146,7 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 				}
 			}
 		} catch (error) {
+			runStatus = ctx.signal?.aborted ? "cancelled" : "failed";
 			loopErrorState = { hasError: true, error };
 		} finally {
 			loopErrorState = await restoreAfterExecution(
@@ -1161,6 +1189,7 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 		if (loopErrorState.hasError) {
 			throw loopErrorState.error;
 		}
+		return runStatus;
 	}
 
 	async function runSharedChainExecution(
@@ -1515,30 +1544,30 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 		}
 	}
 
-	async function runPromptCommand(name: string, args: string, ctx: ExtensionCommandContext) {
+	async function executePromptCommand(name: string, args: string, ctx: ExtensionCommandContext): Promise<PromptTemplatePromptStatus> {
 		storedCommandCtx = ctx;
 		refreshPrompts(ctx.cwd, ctx);
 		const prompt = prompts.get(name);
 		if (!prompt) {
 			notify(ctx, `Prompt "${name}" no longer exists`, "error");
-			return;
+			return "failed";
 		}
 
 		const subagent = extractSubagentOverride(args);
 		const runtimeCwd = subagent.cwd ? expandCwdPath(subagent.cwd) : undefined;
 		if (subagent.cwd && !runtimeCwd) {
 			notify(ctx, `Invalid --cwd path: must be absolute`, "error");
-			return;
+			return "failed";
 		}
 		const argsWithoutSubagent = subagent.args;
 		if (prompt.deterministic) {
 			if (subagent.override || subagent.fork) {
 				notify(ctx, `Deterministic prompts do not support runtime --subagent/--fork in v1`, "error");
-				return;
+				return "failed";
 			}
 			if (extractLoopCount(argsWithoutSubagent)) {
 				notify(ctx, `Deterministic prompts do not support runtime --loop in v1`, "error");
-				return;
+				return "failed";
 			}
 		}
 
@@ -1557,7 +1586,7 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 					fork: subagent.fork,
 				},
 			);
-			return;
+			return ctx.signal?.aborted ? "cancelled" : "completed";
 		}
 
 		if (prompt.chain) {
@@ -1588,11 +1617,11 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 			const { steps, invalidSegments } = parseChainDeclaration(prompt.chain);
 			if (invalidSegments.length > 0) {
 				notify(ctx, `Invalid chain step: ${invalidSegments[0]}`, "error");
-				return;
+				return "failed";
 			}
 			if (steps.length === 0) {
 				notify(ctx, "No templates specified", "error");
-				return;
+				return "failed";
 			}
 
 			const cwdOverride = runtimeCwd ?? prompt.cwd;
@@ -1610,7 +1639,7 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 				prompt.worktree === true,
 				cliWorktree,
 			);
-			return;
+			return ctx.signal?.aborted ? "cancelled" : "completed";
 		}
 
 		const promptOverrides: Partial<Pick<PromptWithModel, "models" | "inheritContext">> = {
@@ -1620,14 +1649,12 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 
 		const loop = extractLoopCount(argsWithoutSubagent);
 		if (loop) {
-			await runPromptLoop(name, loop.args, loop.loopCount, loop.fresh, loop.converge, ctx, subagent.override, runtimeCwd, promptOverrides);
-			return;
+			return await runPromptLoop(name, loop.args, loop.loopCount, loop.fresh, loop.converge, ctx, subagent.override, runtimeCwd, promptOverrides);
 		}
 
 		if (prompt.loop !== undefined) {
 			const flags = extractLoopFlags(argsWithoutSubagent);
-			await runPromptLoop(name, flags.args, prompt.loop, flags.fresh, flags.converge, ctx, subagent.override, runtimeCwd, promptOverrides);
-			return;
+			return await runPromptLoop(name, flags.args, prompt.loop, flags.fresh, flags.converge, ctx, subagent.override, runtimeCwd, promptOverrides);
 		}
 
 		const effectivePrompt = {
@@ -1656,7 +1683,7 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 			undefined,
 			promptTurnRestore,
 		);
-		if (stepResult === "aborted") return;
+		if (stepResult === "aborted") return ctx.signal?.aborted ? "cancelled" : "failed";
 		if (isDelegatedPrompt && stepResult.text) {
 			pi.sendUserMessage(`[Delegated result: ${name}]\n\n${stepResult.text}`);
 			await waitForTurnStart(ctx);
@@ -1665,6 +1692,46 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 
 		if (effectivePrompt.boomerang) {
 			await collapseBoomerangPrompt(ctx, name, boomerangTargetId);
+		}
+		return stepResult.status ?? (ctx.signal?.aborted ? "cancelled" : "completed");
+	}
+
+	async function runPromptCommand(name: string, args: string, ctx: ExtensionCommandContext) {
+		storedCommandCtx = ctx;
+		refreshPrompts(ctx.cwd, ctx);
+		const prompt = prompts.get(name);
+		if (!prompt) {
+			notify(ctx, `Prompt "${name}" no longer exists`, "error");
+			return;
+		}
+
+		const runId = randomUUID();
+		const startId = ctx.sessionManager.getLeafId();
+		const started: PromptTemplatePromptStarted = {
+			protocolVersion: PROMPT_TEMPLATE_PROMPT_PROTOCOL_VERSION,
+			runId,
+			name,
+		};
+		emitPromptLifecycleEvent(pi, PROMPT_TEMPLATE_PROMPT_STARTED_EVENT, started);
+
+		let status: PromptTemplatePromptStatus = "completed";
+		try {
+			status = await executePromptCommand(name, args, ctx);
+		} catch (error) {
+			status = ctx.signal?.aborted ? "cancelled" : "failed";
+			throw error;
+		} finally {
+			const entries = getIterationEntries(ctx, startId);
+			const lastText = getLastAssistantText(entries);
+			const finished: PromptTemplatePromptFinished = {
+				protocolVersion: PROMPT_TEMPLATE_PROMPT_PROTOCOL_VERSION,
+				runId,
+				name,
+				status: ctx.signal?.aborted && status === "completed" ? "cancelled" : status,
+				changed: didIterationMakeChanges(entries),
+				...(lastText ? { lastText } : {}),
+			};
+			emitPromptLifecycleEvent(pi, PROMPT_TEMPLATE_PROMPT_FINISHED_EVENT, finished);
 		}
 	}
 

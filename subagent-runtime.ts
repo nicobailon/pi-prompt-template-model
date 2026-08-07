@@ -4,7 +4,27 @@ export const PROMPT_TEMPLATE_SUBAGENT_RESPONSE_EVENT = "prompt-template:subagent
 export const PROMPT_TEMPLATE_SUBAGENT_UPDATE_EVENT = "prompt-template:subagent:update";
 export const PROMPT_TEMPLATE_SUBAGENT_CANCEL_EVENT = "prompt-template:subagent:cancel";
 export const PROMPT_TEMPLATE_SUBAGENT_MESSAGE_TYPE = "prompt-template-subagent";
+export const PROMPT_TEMPLATE_PROMPT_STARTED_EVENT = "prompt-template:prompt:started";
+export const PROMPT_TEMPLATE_PROMPT_FINISHED_EVENT = "prompt-template:prompt:finished";
+export const PROMPT_TEMPLATE_PROMPT_PROTOCOL_VERSION = 1 as const;
 export const DEFAULT_SUBAGENT_NAME = "delegate";
+
+export type PromptTemplatePromptStatus = "completed" | "failed" | "cancelled";
+
+export interface PromptTemplatePromptStarted {
+	protocolVersion: typeof PROMPT_TEMPLATE_PROMPT_PROTOCOL_VERSION;
+	runId: string;
+	name: string;
+}
+
+export interface PromptTemplatePromptFinished {
+	protocolVersion: typeof PROMPT_TEMPLATE_PROMPT_PROTOCOL_VERSION;
+	runId: string;
+	name: string;
+	status: PromptTemplatePromptStatus;
+	changed: boolean;
+	lastText?: string;
+}
 
 export interface DelegatedSkillBinding {
 	name: string;
