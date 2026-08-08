@@ -2953,3 +2953,58 @@ test("parallel chain loops treat delegated worktree diffs as changes", async () 
 		});
 	});
 });
+
+test("an aborted invocation releases the busy flag instead of wedging the channel", async () => {
+	await withTempHome(async (root) => {
+		const cwd = join(root, "project");
+		mkdirSync(join(cwd, ".pi", "prompts"), { recursive: true });
+		writeFileSync(join(cwd, ".pi", "prompts", "invoke.md"), `---\nmodel: ${MODEL_ID}\n---\ninvoked`);
+
+		const pi = new FakePi();
+		const acknowledgements: any[] = [];
+		const finishedPayloads: any[] = [];
+		pi.events.on(PROMPT_TEMPLATE_PROMPT_INVOKE_ACK_EVENT, (payload) => acknowledgements.push(payload));
+		pi.events.on(PROMPT_TEMPLATE_PROMPT_FINISHED_EVENT, (payload) => finishedPayloads.push(payload));
+		promptModelExtension(pi as never);
+		const { ctx } = createContext(cwd, pi);
+		delete (ctx as any).waitForIdle;
+		delete (ctx as any).navigateTree;
+
+		// The turn never starts and the context is already aborted: the bounded wait
+		// must give up rather than spin, so the finally clears promptActive.
+		ctx.isIdle = () => true;
+		const controller = new AbortController();
+		controller.abort();
+		(ctx as any).signal = controller.signal;
+		await pi.emit("session_start", {}, ctx);
+
+		pi.events.emit(PROMPT_TEMPLATE_PROMPT_INVOKE_REQUEST_EVENT, {
+			protocolVersion: PROMPT_TEMPLATE_PROMPT_INVOKE_PROTOCOL_VERSION,
+			requestId: "abort-1",
+			name: "invoke",
+		});
+
+		const deadline = Date.now() + 5000;
+		while (finishedPayloads.length === 0 && Date.now() < deadline) {
+			await new Promise((resolve) => setTimeout(resolve, 10));
+		}
+
+		assert.equal(acknowledgements.length, 1, "the first request is accepted");
+		assert.equal(acknowledgements[0].accepted, true);
+		assert.equal(finishedPayloads.length, 1, "the aborted run still reports a terminal event");
+		assert.notEqual(finishedPayloads[0].status, "completed");
+
+		// The real regression: a second request must not be refused as busy.
+		pi.events.emit(PROMPT_TEMPLATE_PROMPT_INVOKE_REQUEST_EVENT, {
+			protocolVersion: PROMPT_TEMPLATE_PROMPT_INVOKE_PROTOCOL_VERSION,
+			requestId: "abort-2",
+			name: "invoke",
+		});
+		assert.equal(acknowledgements.length, 2);
+		assert.notEqual(
+			acknowledgements[1].accepted === false && acknowledgements[1].reason,
+			"busy",
+			"an aborted run must not leave the invoke channel permanently busy",
+		);
+	});
+});
