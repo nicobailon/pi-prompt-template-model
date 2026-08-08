@@ -1986,44 +1986,49 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 	});
 
 	async function runChainCommand(args: string, ctx: ExtensionCommandContext) {
-		storedCommandCtx = ctx;
-		refreshPrompts(ctx.cwd, ctx);
+		promptActive = true;
+		try {
+			storedCommandCtx = ctx;
+			refreshPrompts(ctx.cwd, ctx);
 
-		const subagent = extractSubagentOverride(args);
-		const runtimeCwd = subagent.cwd ? expandCwdPath(subagent.cwd) : undefined;
-		if (subagent.cwd && !runtimeCwd) {
-			notify(ctx, `Invalid --cwd path: must be absolute`, "error");
-			return;
-		}
-		const worktreeExtraction = extractWorktreeFlag(subagent.args);
-		const extracted = extractChainContextFlag(worktreeExtraction.args);
-		const loop = extractLoopCount(extracted.args);
-		const cleanedArgs = loop ? loop.args : extracted.args;
+			const subagent = extractSubagentOverride(args);
+			const runtimeCwd = subagent.cwd ? expandCwdPath(subagent.cwd) : undefined;
+			if (subagent.cwd && !runtimeCwd) {
+				notify(ctx, `Invalid --cwd path: must be absolute`, "error");
+				return;
+			}
+			const worktreeExtraction = extractWorktreeFlag(subagent.args);
+			const extracted = extractChainContextFlag(worktreeExtraction.args);
+			const loop = extractLoopCount(extracted.args);
+			const cleanedArgs = loop ? loop.args : extracted.args;
 
-		const { steps, sharedArgs, invalidSegments } = parseChainSteps(cleanedArgs);
-		if (invalidSegments.length > 0) {
-			notify(ctx, `Invalid chain step: ${invalidSegments[0]}`, "error");
-			return;
-		}
-		if (steps.length === 0) {
-			notify(ctx, "No templates specified", "error");
-			return;
-		}
+			const { steps, sharedArgs, invalidSegments } = parseChainSteps(cleanedArgs);
+			if (invalidSegments.length > 0) {
+				notify(ctx, `Invalid chain step: ${invalidSegments[0]}`, "error");
+				return;
+			}
+			if (steps.length === 0) {
+				notify(ctx, "No templates specified", "error");
+				return;
+			}
 
-		await runSharedChainExecution(
-			steps,
-			sharedArgs,
-			loop ? loop.loopCount : 1,
-			loop?.fresh === true,
-			loop?.converge ?? true,
-			true,
-			ctx,
-			subagent.override,
-			runtimeCwd,
-			extracted.chainContext,
-			false,
-			worktreeExtraction.worktree,
-		);
+			await runSharedChainExecution(
+				steps,
+				sharedArgs,
+				loop ? loop.loopCount : 1,
+				loop?.fresh === true,
+				loop?.converge ?? true,
+				true,
+				ctx,
+				subagent.override,
+				runtimeCwd,
+				extracted.chainContext,
+				false,
+				worktreeExtraction.worktree,
+			);
+		} finally {
+			promptActive = false;
+		}
 	}
 
 	if (toolManager.isEnabled()) toolManager.ensureRegistered();
