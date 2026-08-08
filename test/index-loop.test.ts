@@ -6,6 +6,9 @@ import { join } from "node:path";
 import promptModelExtension from "../index.ts";
 import {
 	PROMPT_TEMPLATE_PROMPT_FINISHED_EVENT,
+	PROMPT_TEMPLATE_PROMPT_INVOKE_ACK_EVENT,
+	PROMPT_TEMPLATE_PROMPT_INVOKE_PROTOCOL_VERSION,
+	PROMPT_TEMPLATE_PROMPT_INVOKE_REQUEST_EVENT,
 	PROMPT_TEMPLATE_PROMPT_STARTED_EVENT,
 	PROMPT_TEMPLATE_PROMPT_PROTOCOL_VERSION,
 	PROMPT_TEMPLATE_SUBAGENT_REQUEST_EVENT,
@@ -231,6 +234,158 @@ test("emits one defensive lifecycle pair for an inline prompt run", async () => 
 		assert.equal(lifecycle[0]!.data.runId, lifecycle[1]!.data.runId);
 		assert.equal(lifecycle[1]!.data.status, "completed");
 		assert.equal(lifecycle[1]!.data.changed, false);
+	});
+});
+
+test("accepts invocation requests through the command path and correlates lifecycle events", async () => {
+	await withTempHome(async (root) => {
+		const cwd = join(root, "project");
+		mkdirSync(join(cwd, ".pi", "prompts"), { recursive: true });
+		writeFileSync(join(cwd, ".pi", "prompts", "invoke.md"), `---\nmodel: ${MODEL_ID}\n---\ninvoked $@`);
+
+		const pi = new FakePi();
+		const acknowledgements: any[] = [];
+		const lifecycle: any[] = [];
+		let resolveFinished!: (payload: any) => void;
+		const finished = new Promise<any>((resolve) => { resolveFinished = resolve; });
+		pi.events.on(PROMPT_TEMPLATE_PROMPT_INVOKE_ACK_EVENT, (payload) => acknowledgements.push(payload));
+		pi.events.on(PROMPT_TEMPLATE_PROMPT_INVOKE_ACK_EVENT, () => { throw new Error("ack observer failure"); });
+		pi.events.on(PROMPT_TEMPLATE_PROMPT_STARTED_EVENT, (payload) => lifecycle.push(payload));
+		pi.events.on(PROMPT_TEMPLATE_PROMPT_FINISHED_EVENT, (payload) => {
+			lifecycle.push(payload);
+			resolveFinished(payload);
+		});
+		promptModelExtension(pi as never);
+		const { ctx } = createContext(cwd, pi);
+		await pi.emit("session_start", {}, ctx);
+
+		pi.events.emit(PROMPT_TEMPLATE_PROMPT_INVOKE_REQUEST_EVENT, {
+			protocolVersion: PROMPT_TEMPLATE_PROMPT_INVOKE_PROTOCOL_VERSION,
+			requestId: "graph-1",
+			name: "invoke",
+			args: "hello world",
+		});
+
+		const finishedPayload = await finished;
+		assert.deepEqual(acknowledgements, [{
+			protocolVersion: PROMPT_TEMPLATE_PROMPT_INVOKE_PROTOCOL_VERSION,
+			requestId: "graph-1",
+			name: "invoke",
+			accepted: true,
+			runId: acknowledgements[0].runId,
+		}]);
+		assert.equal(acknowledgements[0].runId, lifecycle[0].runId);
+		assert.equal(finishedPayload.runId, acknowledgements[0].runId);
+		assert.equal(lifecycle.length, 2);
+		assert.equal(finishedPayload.name, "invoke");
+		assert.equal(finishedPayload.status, "completed");
+		assert.equal(pi.userMessages.at(-1), "invoked hello world");
+	});
+});
+
+test("refuses unknown invocation requests without starting a run", async () => {
+	await withTempHome(async (root) => {
+		const cwd = join(root, "project");
+		mkdirSync(join(cwd, ".pi", "prompts"), { recursive: true });
+		const pi = new FakePi();
+		const acknowledgements: any[] = [];
+		const lifecycle: any[] = [];
+		pi.events.on(PROMPT_TEMPLATE_PROMPT_INVOKE_ACK_EVENT, (payload) => acknowledgements.push(payload));
+		pi.events.on(PROMPT_TEMPLATE_PROMPT_STARTED_EVENT, (payload) => lifecycle.push(payload));
+		pi.events.on(PROMPT_TEMPLATE_PROMPT_FINISHED_EVENT, (payload) => lifecycle.push(payload));
+		promptModelExtension(pi as never);
+		const { ctx } = createContext(cwd, pi);
+		await pi.emit("session_start", {}, ctx);
+
+		pi.events.emit(PROMPT_TEMPLATE_PROMPT_INVOKE_REQUEST_EVENT, {
+			protocolVersion: PROMPT_TEMPLATE_PROMPT_INVOKE_PROTOCOL_VERSION,
+			requestId: "graph-missing",
+			name: "missing",
+		});
+
+		assert.deepEqual(acknowledgements, [{
+			protocolVersion: PROMPT_TEMPLATE_PROMPT_INVOKE_PROTOCOL_VERSION,
+			requestId: "graph-missing",
+			name: "missing",
+			accepted: false,
+			reason: "unknown-template",
+		}]);
+		assert.deepEqual(lifecycle, []);
+	});
+});
+
+test("refuses invocation requests while a prompt run is active", async () => {
+	await withTempHome(async (root) => {
+		const cwd = join(root, "project");
+		mkdirSync(join(cwd, ".pi", "prompts"), { recursive: true });
+		writeFileSync(join(cwd, ".pi", "prompts", "invoke.md"), `---\nmodel: ${MODEL_ID}\n---\ninvoked`);
+
+		const pi = new FakePi();
+		const acknowledgements: any[] = [];
+		const lifecycle: any[] = [];
+		let resolveFinished!: (payload: any) => void;
+		const finished = new Promise<any>((resolve) => { resolveFinished = resolve; });
+		pi.events.on(PROMPT_TEMPLATE_PROMPT_INVOKE_ACK_EVENT, (payload) => acknowledgements.push(payload));
+		pi.events.on(PROMPT_TEMPLATE_PROMPT_INVOKE_ACK_EVENT, () => { throw new Error("ack observer failure"); });
+		pi.events.on(PROMPT_TEMPLATE_PROMPT_STARTED_EVENT, (payload) => {
+			lifecycle.push(payload);
+			pi.events.emit(PROMPT_TEMPLATE_PROMPT_INVOKE_REQUEST_EVENT, {
+				protocolVersion: PROMPT_TEMPLATE_PROMPT_INVOKE_PROTOCOL_VERSION,
+				requestId: "graph-busy",
+				name: "invoke",
+			});
+		});
+		pi.events.on(PROMPT_TEMPLATE_PROMPT_FINISHED_EVENT, (payload) => {
+			lifecycle.push(payload);
+			resolveFinished(payload);
+		});
+		promptModelExtension(pi as never);
+		const { ctx } = createContext(cwd, pi);
+		await pi.emit("session_start", {}, ctx);
+
+		pi.events.emit(PROMPT_TEMPLATE_PROMPT_INVOKE_REQUEST_EVENT, {
+			protocolVersion: PROMPT_TEMPLATE_PROMPT_INVOKE_PROTOCOL_VERSION,
+			requestId: "graph-first",
+			name: "invoke",
+		});
+		await finished;
+
+		assert.equal(acknowledgements.length, 2);
+		assert.equal(acknowledgements[0].accepted, true);
+		assert.equal(acknowledgements[1].requestId, "graph-busy");
+		assert.equal(acknowledgements[1].accepted, false);
+		assert.equal(acknowledgements[1].reason, "busy");
+		assert.equal(lifecycle.length, 2);
+		assert.equal(lifecycle[0].runId, lifecycle[1].runId);
+	});
+});
+
+test("refuses chain-template invocation requests without starting a run", async () => {
+	await withTempHome(async (root) => {
+		const cwd = join(root, "project");
+		mkdirSync(join(cwd, ".pi", "prompts"), { recursive: true });
+		writeFileSync(join(cwd, ".pi", "prompts", "chain.md"), "---\nchain: first\n---\nignored");
+		writeFileSync(join(cwd, ".pi", "prompts", "first.md"), `---\nmodel: ${MODEL_ID}\n---\nfirst`);
+
+		const pi = new FakePi();
+		const acknowledgements: any[] = [];
+		const lifecycle: any[] = [];
+		pi.events.on(PROMPT_TEMPLATE_PROMPT_INVOKE_ACK_EVENT, (payload) => acknowledgements.push(payload));
+		pi.events.on(PROMPT_TEMPLATE_PROMPT_STARTED_EVENT, (payload) => lifecycle.push(payload));
+		pi.events.on(PROMPT_TEMPLATE_PROMPT_FINISHED_EVENT, (payload) => lifecycle.push(payload));
+		promptModelExtension(pi as never);
+		const { ctx } = createContext(cwd, pi);
+		await pi.emit("session_start", {}, ctx);
+
+		pi.events.emit(PROMPT_TEMPLATE_PROMPT_INVOKE_REQUEST_EVENT, {
+			protocolVersion: PROMPT_TEMPLATE_PROMPT_INVOKE_PROTOCOL_VERSION,
+			requestId: "graph-chain",
+			name: "chain",
+		});
+
+		assert.equal(acknowledgements[0].accepted, false);
+		assert.equal(acknowledgements[0].reason, "chain-template");
+		assert.deepEqual(lifecycle, []);
 	});
 });
 
