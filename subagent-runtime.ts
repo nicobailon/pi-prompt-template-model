@@ -34,7 +34,8 @@ export type PromptTemplatePromptInvokeRefusalReason =
 	| "chain-template"
 	| "invalid-request"
 	| "not-ready"
-	| "unknown-template";
+	| "unknown-template"
+	| "unsupported-context";
 
 export interface PromptTemplatePromptInvokeRequest {
 	protocolVersion: typeof PROMPT_TEMPLATE_PROMPT_INVOKE_PROTOCOL_VERSION;

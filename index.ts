@@ -160,7 +160,7 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 	let accumulatedSummaries: string[] = [];
 	let lastDiagnostics = "";
 	let storedCommandCtx: ExtensionCommandContext | null = null;
-	let invocationCtx: ExtensionCommandContext | null = null;
+	let invocationCtx: ExtensionContext | null = null;
 	let promptActive = false;
 	const UNLIMITED_LOOP_CAP = 999;
 
@@ -285,6 +285,16 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 			});
 			return;
 		}
+		if (prompt.boomerang || prompt.loop !== undefined || extractLoopCount(request.args ?? "")) {
+			emitPromptInvocationAcknowledgement(pi, {
+				protocolVersion: PROMPT_TEMPLATE_PROMPT_INVOKE_PROTOCOL_VERSION,
+				requestId: request.requestId,
+				name: request.name,
+				accepted: false,
+				reason: "unsupported-context",
+			});
+			return;
+		}
 
 		const runId = randomUUID();
 		promptActive = true;
@@ -295,7 +305,7 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 			accepted: true,
 			runId,
 		});
-		void runPromptCommand(request.name, request.args ?? "", ctx, runId, true).catch(() => {
+		void runPromptCommand(request.name, request.args ?? "", ctx, runId, true, prompt).catch(() => {
 			// Invocation errors are reported through the lifecycle event and must not become unhandled rejections.
 		});
 	}
@@ -400,6 +410,21 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 		return resolution.skills.map((skill) => ({ name: skill.skillName, path: skill.skillPath }));
 	}
 
+	function isCommandContext(ctx: ExtensionContext): ctx is ExtensionCommandContext {
+		const candidate = ctx as Partial<ExtensionCommandContext>;
+		return typeof candidate.waitForIdle === "function" && typeof candidate.navigateTree === "function";
+	}
+
+	async function waitForPromptIdle(ctx: ExtensionContext): Promise<void> {
+		if (isCommandContext(ctx)) {
+			await ctx.waitForIdle();
+			return;
+		}
+		while (!ctx.isIdle()) {
+			await new Promise((resolve) => setTimeout(resolve, 10));
+		}
+	}
+
 	async function waitForTurnStart(ctx: ExtensionContext) {
 		while (ctx.isIdle()) {
 			await new Promise((resolve) => setTimeout(resolve, 10));
@@ -417,7 +442,7 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 	async function executePromptStep(
 		prompt: PromptWithModel,
 		args: string[],
-		ctx: ExtensionCommandContext,
+		ctx: ExtensionContext,
 		currentModel: Model<any> | undefined,
 		override?: SubagentOverride,
 		inheritedModel?: Model<any>,
@@ -557,7 +582,7 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 		const content = loopContext ? `[${loopContext}]\n\n${effectiveContent}` : effectiveContent;
 		pi.sendUserMessage(content);
 		await waitForTurnStart(ctx);
-		await ctx.waitForIdle();
+		await waitForPromptIdle(ctx);
 
 		const entries = getIterationEntries(ctx, startId);
 		if (wasIterationAborted(entries)) return "aborted";
@@ -721,7 +746,7 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 	async function resolveCompareBaseModel(
 		prompt: PromptWithModel,
 		currentModel: Model<any> | undefined,
-		ctx: ExtensionCommandContext,
+		ctx: ExtensionContext,
 		modelOverride?: string,
 	): Promise<Model<any> | undefined> {
 		const requestedModels = modelOverride ? [modelOverride] : prompt.models;
@@ -738,14 +763,14 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 		return undefined;
 	}
 
-	function resolveCompareCwd(raw: string, ctx: ExtensionCommandContext): string {
+	function resolveCompareCwd(raw: string, ctx: ExtensionContext): string {
 		return expandCwdPath(raw) ?? resolvePath(ctx.cwd, raw);
 	}
 
 	function normalizeLineupCwds(
 		slots: DelegationLineupSlot[],
 		defaultCwd: string,
-		ctx: ExtensionCommandContext,
+		ctx: ExtensionContext,
 	): DelegationLineupSlot[] | undefined {
 		const normalized: DelegationLineupSlot[] = [];
 		for (const slot of slots) {
@@ -889,7 +914,7 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 		name: string,
 		prompt: PromptWithModel,
 		args: string,
-		ctx: ExtensionCommandContext,
+		ctx: ExtensionContext,
 		currentModel: Model<any> | undefined,
 		runtime: { cwd?: string; model?: string; subagentOverride?: SubagentOverride; fork?: boolean },
 	) {
@@ -1065,7 +1090,7 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 					: successfulReviewerText;
 				pi.sendUserMessage(`[Compare review complete: ${name}]\n\n${finalText}`);
 				await waitForTurnStart(ctx);
-				await ctx.waitForIdle();
+				await waitForPromptIdle(ctx);
 				return;
 			}
 
@@ -1095,14 +1120,14 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 			if (!finalResult?.text) return;
 			pi.sendUserMessage(`[Compare apply complete: ${name}]\n\n${finalResult.text}`);
 			await waitForTurnStart(ctx);
-			await ctx.waitForIdle();
+			await waitForPromptIdle(ctx);
 		} catch (error) {
 			notify(ctx, error instanceof Error ? error.message : String(error), "error");
 		}
 	}
 
 	async function collapseBoomerangPrompt(
-		ctx: ExtensionContext,
+		ctx: ExtensionCommandContext,
 		name: string,
 		targetId: string | null,
 		previousSummaries: string[] = [],
@@ -1280,7 +1305,7 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 				: `Delegated loop completed ${completedIterations} iteration(s): ${name}`;
 			pi.sendUserMessage(`[${label}]\n\n${lastDelegatedText}`);
 			await waitForTurnStart(ctx);
-			await ctx.waitForIdle();
+			await waitForPromptIdle(ctx);
 		}
 
 		if (!loopErrorState.hasError && !loopAborted && shouldBoomerang) {
@@ -1637,7 +1662,7 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 		if (lastDelegatedText && !chainErrorState.hasError && !chainAborted) {
 			pi.sendUserMessage(`[Delegated chain complete: ${chainStepNames}]\n\n${lastDelegatedText}`);
 			await waitForTurnStart(ctx);
-			await ctx.waitForIdle();
+			await waitForPromptIdle(ctx);
 		}
 
 		if (chainErrorState.hasError) {
@@ -1646,10 +1671,15 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 		return chainAborted ? (ctx.signal?.aborted ? "cancelled" : "failed") : "completed";
 	}
 
-	async function executePromptCommand(name: string, args: string, ctx: ExtensionCommandContext): Promise<PromptTemplatePromptStatus> {
-		storedCommandCtx = ctx;
+	async function executePromptCommand(
+		name: string,
+		args: string,
+		ctx: ExtensionContext,
+		resolvedPrompt?: PromptWithModel,
+	): Promise<PromptTemplatePromptStatus> {
+		storedCommandCtx = isCommandContext(ctx) ? ctx : storedCommandCtx;
 		refreshPrompts(ctx.cwd, ctx);
-		const prompt = prompts.get(name);
+		const prompt = resolvedPrompt ?? prompts.get(name);
 		if (!prompt) {
 			notify(ctx, `Prompt "${name}" no longer exists`, "error");
 			return "failed";
@@ -1692,6 +1722,7 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 		}
 
 		if (prompt.chain) {
+			if (!isCommandContext(ctx)) return "failed";
 			if (subagent.model) notify(ctx, `--model is not supported on chain prompts (ignored)`, "warning");
 			if (subagent.fork) notify(ctx, `--fork is not supported on chain prompts (ignored)`, "warning");
 			const worktreeExtraction = extractWorktreeFlag(argsWithoutSubagent);
@@ -1750,12 +1781,14 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 
 		const loop = extractLoopCount(argsWithoutSubagent);
 		if (loop) {
-			return await runPromptLoop(name, loop.args, loop.loopCount, loop.fresh, loop.converge, ctx, subagent.override, runtimeCwd, promptOverrides);
+			if (!isCommandContext(ctx)) return "failed";
+			return (await runPromptLoop(name, loop.args, loop.loopCount, loop.fresh, loop.converge, ctx, subagent.override, runtimeCwd, promptOverrides)) ?? "completed";
 		}
 
 		if (prompt.loop !== undefined) {
+			if (!isCommandContext(ctx)) return "failed";
 			const flags = extractLoopFlags(argsWithoutSubagent);
-			return await runPromptLoop(name, flags.args, prompt.loop, flags.fresh, flags.converge, ctx, subagent.override, runtimeCwd, promptOverrides);
+			return (await runPromptLoop(name, flags.args, prompt.loop, flags.fresh, flags.converge, ctx, subagent.override, runtimeCwd, promptOverrides)) ?? "completed";
 		}
 
 		const effectivePrompt = {
@@ -1788,10 +1821,11 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 		if (isDelegatedPrompt && stepResult.text) {
 			pi.sendUserMessage(`[Delegated result: ${name}]\n\n${stepResult.text}`);
 			await waitForTurnStart(ctx);
-			await ctx.waitForIdle();
+			await waitForPromptIdle(ctx);
 		}
 
 		if (effectivePrompt.boomerang) {
+			if (!isCommandContext(ctx)) return "failed";
 			await collapseBoomerangPrompt(ctx, name, boomerangTargetId);
 		}
 		return stepResult.status ?? (ctx.signal?.aborted ? "cancelled" : "completed");
@@ -1800,15 +1834,16 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 	async function runPromptCommand(
 		name: string,
 		args: string,
-		ctx: ExtensionCommandContext,
+		ctx: ExtensionContext,
 		runId = randomUUID(),
 		activeAlready = false,
+		resolvedPrompt?: PromptWithModel,
 	) {
 		if (!activeAlready) promptActive = true;
 		try {
-			storedCommandCtx = ctx;
+			if (isCommandContext(ctx)) storedCommandCtx = ctx;
 			refreshPrompts(ctx.cwd, ctx);
-			const prompt = prompts.get(name);
+			const prompt = resolvedPrompt ?? prompts.get(name);
 			if (!prompt) {
 				notify(ctx, `Prompt "${name}" no longer exists`, "error");
 				return;
@@ -1824,7 +1859,7 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 
 			let status: PromptTemplatePromptStatus = "completed";
 			try {
-				status = await executePromptCommand(name, args, ctx);
+				status = await executePromptCommand(name, args, ctx, resolvedPrompt);
 			} catch (error) {
 				status = ctx.signal?.aborted ? "cancelled" : "failed";
 				throw error;
@@ -1848,7 +1883,7 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 
 	function resetSessionScopedState(ctx: ExtensionContext) {
 		storedCommandCtx = null;
-		invocationCtx = ctx as ExtensionCommandContext;
+		invocationCtx = ctx;
 		pendingSkillMessage = undefined;
 		previousModel = undefined;
 		previousThinking = undefined;

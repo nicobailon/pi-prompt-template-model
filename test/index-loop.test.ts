@@ -249,6 +249,9 @@ test("accepts invocation requests through the command path and correlates lifecy
 		let resolveFinished!: (payload: any) => void;
 		const finished = new Promise<any>((resolve) => { resolveFinished = resolve; });
 		pi.events.on(PROMPT_TEMPLATE_PROMPT_INVOKE_ACK_EVENT, (payload) => acknowledgements.push(payload));
+		pi.events.on(PROMPT_TEMPLATE_PROMPT_INVOKE_ACK_EVENT, (payload: any) => {
+			if (payload.accepted) writeFileSync(join(cwd, ".pi", "prompts", "invoke.md"), "---\nchain: first\n---\nrewritten");
+		});
 		pi.events.on(PROMPT_TEMPLATE_PROMPT_INVOKE_ACK_EVENT, () => { throw new Error("ack observer failure"); });
 		pi.events.on(PROMPT_TEMPLATE_PROMPT_STARTED_EVENT, (payload) => lifecycle.push(payload));
 		pi.events.on(PROMPT_TEMPLATE_PROMPT_FINISHED_EVENT, (payload) => {
@@ -257,6 +260,15 @@ test("accepts invocation requests through the command path and correlates lifecy
 		});
 		promptModelExtension(pi as never);
 		const { ctx } = createContext(cwd, pi);
+		delete (ctx as any).waitForIdle;
+		delete (ctx as any).navigateTree;
+		let idle = false;
+		ctx.isIdle = () => idle;
+		const sendUserMessage = pi.sendUserMessage.bind(pi);
+		pi.sendUserMessage = (content: string) => {
+			sendUserMessage(content);
+			setTimeout(() => { idle = true; }, 0);
+		};
 		await pi.emit("session_start", {}, ctx);
 
 		pi.events.emit(PROMPT_TEMPLATE_PROMPT_INVOKE_REQUEST_EVENT, {
