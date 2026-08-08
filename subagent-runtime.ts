@@ -7,6 +7,9 @@ export const PROMPT_TEMPLATE_SUBAGENT_MESSAGE_TYPE = "prompt-template-subagent";
 export const PROMPT_TEMPLATE_PROMPT_STARTED_EVENT = "prompt-template:prompt:started";
 export const PROMPT_TEMPLATE_PROMPT_FINISHED_EVENT = "prompt-template:prompt:finished";
 export const PROMPT_TEMPLATE_PROMPT_PROTOCOL_VERSION = 1 as const;
+export const PROMPT_TEMPLATE_PROMPT_INVOKE_REQUEST_EVENT = "prompt-template:prompt:invoke";
+export const PROMPT_TEMPLATE_PROMPT_INVOKE_ACK_EVENT = "prompt-template:prompt:invoke:ack";
+export const PROMPT_TEMPLATE_PROMPT_INVOKE_PROTOCOL_VERSION = 1 as const;
 export const DEFAULT_SUBAGENT_NAME = "delegate";
 
 export type PromptTemplatePromptStatus = "completed" | "failed" | "cancelled";
@@ -25,6 +28,40 @@ export interface PromptTemplatePromptFinished {
 	changed: boolean;
 	lastText?: string;
 }
+
+export type PromptTemplatePromptInvokeRefusalReason =
+	| "busy"
+	| "chain-template"
+	| "invalid-request"
+	| "not-ready"
+	| "unknown-template";
+
+export interface PromptTemplatePromptInvokeRequest {
+	protocolVersion: typeof PROMPT_TEMPLATE_PROMPT_INVOKE_PROTOCOL_VERSION;
+	requestId: string;
+	name: string;
+	args?: string;
+}
+
+export interface PromptTemplatePromptInvokeAccepted {
+	protocolVersion: typeof PROMPT_TEMPLATE_PROMPT_INVOKE_PROTOCOL_VERSION;
+	requestId: string;
+	name: string;
+	accepted: true;
+	runId: string;
+}
+
+export interface PromptTemplatePromptInvokeRefused {
+	protocolVersion: typeof PROMPT_TEMPLATE_PROMPT_INVOKE_PROTOCOL_VERSION;
+	requestId: string;
+	name: string;
+	accepted: false;
+	reason: PromptTemplatePromptInvokeRefusalReason;
+}
+
+export type PromptTemplatePromptInvokeAcknowledgement =
+	| PromptTemplatePromptInvokeAccepted
+	| PromptTemplatePromptInvokeRefused;
 
 export interface DelegatedSkillBinding {
 	name: string;

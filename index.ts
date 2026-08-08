@@ -36,11 +36,16 @@ import { executeSubagentPromptStep, type DelegatedPromptParallelResult } from ".
 import {
 	DEFAULT_SUBAGENT_NAME,
 	PROMPT_TEMPLATE_PROMPT_FINISHED_EVENT,
+	PROMPT_TEMPLATE_PROMPT_INVOKE_ACK_EVENT,
+	PROMPT_TEMPLATE_PROMPT_INVOKE_PROTOCOL_VERSION,
+	PROMPT_TEMPLATE_PROMPT_INVOKE_REQUEST_EVENT,
 	PROMPT_TEMPLATE_PROMPT_PROTOCOL_VERSION,
 	PROMPT_TEMPLATE_PROMPT_STARTED_EVENT,
 	PROMPT_TEMPLATE_SUBAGENT_MESSAGE_TYPE,
 	type DelegatedSkillBinding,
 	type PromptTemplatePromptFinished,
+	type PromptTemplatePromptInvokeAcknowledgement,
+	type PromptTemplatePromptInvokeRequest,
 	type PromptTemplatePromptStarted,
 	type PromptTemplatePromptStatus,
 } from "./subagent-runtime.ts";
@@ -113,6 +118,14 @@ function emitPromptLifecycleEvent(
 	}
 }
 
+function emitPromptInvocationAcknowledgement(pi: ExtensionAPI, payload: PromptTemplatePromptInvokeAcknowledgement): void {
+	try {
+		pi.events.emit(PROMPT_TEMPLATE_PROMPT_INVOKE_ACK_EVENT, payload);
+	} catch {
+		// Invocation observers must not affect prompt execution.
+	}
+}
+
 const DEFAULT_COMPARE_REVIEWER_TASK = [
 	"Review the worker variants and produce findings only.",
 	"Required output:",
@@ -147,6 +160,8 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 	let accumulatedSummaries: string[] = [];
 	let lastDiagnostics = "";
 	let storedCommandCtx: ExtensionCommandContext | null = null;
+	let invocationCtx: ExtensionCommandContext | null = null;
+	let promptActive = false;
 	const UNLIMITED_LOOP_CAP = 999;
 
 	const toolManager = createToolManager(pi, {
@@ -198,6 +213,91 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 			notify(ctx, summary, "warning");
 		}
 		lastDiagnostics = fingerprint;
+	}
+
+	function isPromptBusy(): boolean {
+		return promptActive || loopState !== null || chainActive;
+	}
+
+	function handlePromptInvocation(payload: unknown): void {
+		if (!payload || typeof payload !== "object") return;
+		const candidate = payload as Record<string, unknown>;
+		const requestId = candidate.requestId;
+		const name = candidate.name;
+		if (typeof requestId !== "string" || typeof name !== "string") return;
+
+		if (
+			candidate.protocolVersion !== PROMPT_TEMPLATE_PROMPT_INVOKE_PROTOCOL_VERSION ||
+			(candidate.args !== undefined && typeof candidate.args !== "string")
+		) {
+			emitPromptInvocationAcknowledgement(pi, {
+				protocolVersion: PROMPT_TEMPLATE_PROMPT_INVOKE_PROTOCOL_VERSION,
+				requestId,
+				name,
+				accepted: false,
+				reason: "invalid-request",
+			});
+			return;
+		}
+
+		const request = candidate as unknown as PromptTemplatePromptInvokeRequest;
+		const ctx = invocationCtx;
+		if (!ctx) {
+			emitPromptInvocationAcknowledgement(pi, {
+				protocolVersion: PROMPT_TEMPLATE_PROMPT_INVOKE_PROTOCOL_VERSION,
+				requestId: request.requestId,
+				name: request.name,
+				accepted: false,
+				reason: "not-ready",
+			});
+			return;
+		}
+		if (isPromptBusy()) {
+			emitPromptInvocationAcknowledgement(pi, {
+				protocolVersion: PROMPT_TEMPLATE_PROMPT_INVOKE_PROTOCOL_VERSION,
+				requestId: request.requestId,
+				name: request.name,
+				accepted: false,
+				reason: "busy",
+			});
+			return;
+		}
+
+		refreshPrompts(ctx.cwd, ctx);
+		const prompt = prompts.get(request.name);
+		if (!prompt) {
+			emitPromptInvocationAcknowledgement(pi, {
+				protocolVersion: PROMPT_TEMPLATE_PROMPT_INVOKE_PROTOCOL_VERSION,
+				requestId: request.requestId,
+				name: request.name,
+				accepted: false,
+				reason: "unknown-template",
+			});
+			return;
+		}
+		if (prompt.chain) {
+			emitPromptInvocationAcknowledgement(pi, {
+				protocolVersion: PROMPT_TEMPLATE_PROMPT_INVOKE_PROTOCOL_VERSION,
+				requestId: request.requestId,
+				name: request.name,
+				accepted: false,
+				reason: "chain-template",
+			});
+			return;
+		}
+
+		const runId = randomUUID();
+		promptActive = true;
+		emitPromptInvocationAcknowledgement(pi, {
+			protocolVersion: PROMPT_TEMPLATE_PROMPT_INVOKE_PROTOCOL_VERSION,
+			requestId: request.requestId,
+			name: request.name,
+			accepted: true,
+			runId,
+		});
+		void runPromptCommand(request.name, request.args ?? "", ctx, runId, true).catch(() => {
+			// Invocation errors are reported through the lifecycle event and must not become unhandled rejections.
+		});
 	}
 
 	function consumePendingSkillMessage() {
@@ -1697,47 +1797,58 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 		return stepResult.status ?? (ctx.signal?.aborted ? "cancelled" : "completed");
 	}
 
-	async function runPromptCommand(name: string, args: string, ctx: ExtensionCommandContext) {
-		storedCommandCtx = ctx;
-		refreshPrompts(ctx.cwd, ctx);
-		const prompt = prompts.get(name);
-		if (!prompt) {
-			notify(ctx, `Prompt "${name}" no longer exists`, "error");
-			return;
-		}
-
-		const runId = randomUUID();
-		const startId = ctx.sessionManager.getLeafId();
-		const started: PromptTemplatePromptStarted = {
-			protocolVersion: PROMPT_TEMPLATE_PROMPT_PROTOCOL_VERSION,
-			runId,
-			name,
-		};
-		emitPromptLifecycleEvent(pi, PROMPT_TEMPLATE_PROMPT_STARTED_EVENT, started);
-
-		let status: PromptTemplatePromptStatus = "completed";
+	async function runPromptCommand(
+		name: string,
+		args: string,
+		ctx: ExtensionCommandContext,
+		runId = randomUUID(),
+		activeAlready = false,
+	) {
+		if (!activeAlready) promptActive = true;
 		try {
-			status = await executePromptCommand(name, args, ctx);
-		} catch (error) {
-			status = ctx.signal?.aborted ? "cancelled" : "failed";
-			throw error;
-		} finally {
-			const entries = getIterationEntries(ctx, startId);
-			const lastText = getLastAssistantText(entries);
-			const finished: PromptTemplatePromptFinished = {
+			storedCommandCtx = ctx;
+			refreshPrompts(ctx.cwd, ctx);
+			const prompt = prompts.get(name);
+			if (!prompt) {
+				notify(ctx, `Prompt "${name}" no longer exists`, "error");
+				return;
+			}
+
+			const startId = ctx.sessionManager.getLeafId();
+			const started: PromptTemplatePromptStarted = {
 				protocolVersion: PROMPT_TEMPLATE_PROMPT_PROTOCOL_VERSION,
 				runId,
 				name,
-				status: ctx.signal?.aborted && status === "completed" ? "cancelled" : status,
-				changed: didIterationMakeChanges(entries),
-				...(lastText ? { lastText } : {}),
 			};
-			emitPromptLifecycleEvent(pi, PROMPT_TEMPLATE_PROMPT_FINISHED_EVENT, finished);
+			emitPromptLifecycleEvent(pi, PROMPT_TEMPLATE_PROMPT_STARTED_EVENT, started);
+
+			let status: PromptTemplatePromptStatus = "completed";
+			try {
+				status = await executePromptCommand(name, args, ctx);
+			} catch (error) {
+				status = ctx.signal?.aborted ? "cancelled" : "failed";
+				throw error;
+			} finally {
+				const entries = getIterationEntries(ctx, startId);
+				const lastText = getLastAssistantText(entries);
+				const finished: PromptTemplatePromptFinished = {
+					protocolVersion: PROMPT_TEMPLATE_PROMPT_PROTOCOL_VERSION,
+					runId,
+					name,
+					status: ctx.signal?.aborted && status === "completed" ? "cancelled" : status,
+					changed: didIterationMakeChanges(entries),
+					...(lastText ? { lastText } : {}),
+				};
+				emitPromptLifecycleEvent(pi, PROMPT_TEMPLATE_PROMPT_FINISHED_EVENT, finished);
+			}
+		} finally {
+			promptActive = false;
 		}
 	}
 
 	function resetSessionScopedState(ctx: ExtensionContext) {
 		storedCommandCtx = null;
+		invocationCtx = ctx as ExtensionCommandContext;
 		pendingSkillMessage = undefined;
 		previousModel = undefined;
 		previousThinking = undefined;
@@ -1746,6 +1857,10 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 		toolManager.clearQueue();
 		refreshPrompts(ctx.cwd, ctx);
 	}
+
+	pi.events.on(PROMPT_TEMPLATE_PROMPT_INVOKE_REQUEST_EVENT, (payload) => {
+		handlePromptInvocation(payload);
+	});
 
 	pi.on("session_start", async (_event, ctx) => {
 		resetSessionScopedState(ctx);
