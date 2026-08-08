@@ -415,20 +415,39 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 		return typeof candidate.waitForIdle === "function" && typeof candidate.navigateTree === "function";
 	}
 
+	// A base ExtensionContext has no waitForIdle, so an invoked prompt polls instead.
+	// Both waits are bounded and abort-aware on purpose: an unbounded wait here does
+	// not merely hang one run, it leaves promptActive set, and PTM then refuses every
+	// later invocation as busy for the lifetime of the session.
+	const INVOKE_TURN_START_TIMEOUT_MS = 60_000;
+	const INVOKE_IDLE_TIMEOUT_MS = 1_800_000;
+
+	async function pollUntil(
+		ctx: ExtensionContext,
+		done: () => boolean,
+		timeoutMs: number,
+		what: string,
+	): Promise<void> {
+		const deadline = Date.now() + timeoutMs;
+		while (!done()) {
+			if (ctx.signal?.aborted) throw new Error(`Prompt invocation aborted while ${what}`);
+			if (Date.now() > deadline) {
+				throw new Error(`Prompt invocation timed out after ${timeoutMs}ms while ${what}`);
+			}
+			await new Promise((resolve) => setTimeout(resolve, 10));
+		}
+	}
+
 	async function waitForPromptIdle(ctx: ExtensionContext): Promise<void> {
 		if (isCommandContext(ctx)) {
 			await ctx.waitForIdle();
 			return;
 		}
-		while (!ctx.isIdle()) {
-			await new Promise((resolve) => setTimeout(resolve, 10));
-		}
+		await pollUntil(ctx, () => ctx.isIdle(), INVOKE_IDLE_TIMEOUT_MS, "waiting for the run to finish");
 	}
 
 	async function waitForTurnStart(ctx: ExtensionContext) {
-		while (ctx.isIdle()) {
-			await new Promise((resolve) => setTimeout(resolve, 10));
-		}
+		await pollUntil(ctx, () => !ctx.isIdle(), INVOKE_TURN_START_TIMEOUT_MS, "waiting for the turn to start");
 	}
 
 	function shouldDelegatePrompt(prompt: PromptWithModel, override?: SubagentOverride): boolean {
