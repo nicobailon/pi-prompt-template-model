@@ -424,6 +424,54 @@ test("chain template validation failure emits failed lifecycle status", async ()
 		assert.equal(lifecycle[0]!.data.runId, lifecycle[1]!.data.runId);
 		assert.equal(lifecycle[1]!.data.name, "pipeline");
 		assert.equal(lifecycle[1]!.data.status, "failed");
+});
+
+test("refuses invocation while a direct chain command is finishing", async () => {
+	await withTempHome(async (root) => {
+		const cwd = join(root, "project");
+		mkdirSync(join(cwd, ".pi", "prompts"), { recursive: true });
+		writeFileSync(join(cwd, ".pi", "prompts", "worker.md"), `---\nmodel: ${MODEL_ID}\nsubagent: true\n---\nworker`);
+		writeFileSync(join(cwd, ".pi", "prompts", "invoke.md"), `---\nmodel: ${MODEL_ID}\n---\ninvoke`);
+
+		const pi = new FakePi();
+		const acknowledgements: any[] = [];
+		const { ctx } = createBranchingContext(cwd, pi);
+		promptModelExtension(pi as never);
+		await pi.emit("session_start", {}, ctx);
+
+		pi.events.on(PROMPT_TEMPLATE_PROMPT_INVOKE_ACK_EVENT, (payload) => acknowledgements.push(payload));
+		pi.events.on(PROMPT_TEMPLATE_SUBAGENT_REQUEST_EVENT, (payload) => {
+			const request = payload as any;
+			pi.events.emit(PROMPT_TEMPLATE_SUBAGENT_STARTED_EVENT, { requestId: request.requestId });
+			pi.events.emit(PROMPT_TEMPLATE_SUBAGENT_RESPONSE_EVENT, {
+				...request,
+				messages: [{ role: "assistant", content: [{ type: "text", text: "worker done" }] }],
+				isError: false,
+			});
+		});
+
+		let injected = false;
+		const waitForIdle = ctx.waitForIdle.bind(ctx);
+		ctx.waitForIdle = async () => {
+			if (!injected) {
+				injected = true;
+				pi.events.emit(PROMPT_TEMPLATE_PROMPT_INVOKE_REQUEST_EVENT, {
+					protocolVersion: PROMPT_TEMPLATE_PROMPT_INVOKE_PROTOCOL_VERSION,
+					requestId: "graph-direct-chain",
+					name: "invoke",
+				});
+			}
+			await waitForIdle();
+		};
+
+		await pi.commands.get("chain-prompts")!.handler("worker", ctx);
+		assert.deepEqual(acknowledgements, [{
+			protocolVersion: PROMPT_TEMPLATE_PROMPT_INVOKE_PROTOCOL_VERSION,
+			requestId: "graph-direct-chain",
+			name: "invoke",
+			accepted: false,
+			reason: "busy",
+		}]);
 	});
 });
 
