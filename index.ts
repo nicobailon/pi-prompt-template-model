@@ -108,21 +108,26 @@ interface PromptTurnRestore {
 
 function emitPromptLifecycleEvent(
 	pi: ExtensionAPI,
+	ctx: Pick<ExtensionContext, "hasUI" | "ui"> | undefined,
 	event: typeof PROMPT_TEMPLATE_PROMPT_STARTED_EVENT | typeof PROMPT_TEMPLATE_PROMPT_FINISHED_EVENT,
 	payload: PromptTemplatePromptStarted | PromptTemplatePromptFinished,
 ): void {
 	try {
 		pi.events.emit(event, payload);
-	} catch {
-		// Prompt lifecycle observers must not affect prompt execution.
+	} catch (error) {
+		notify(ctx, `Prompt lifecycle observer failed: ${error instanceof Error ? error.message : String(error)}`, "warning");
 	}
 }
 
-function emitPromptInvocationAcknowledgement(pi: ExtensionAPI, payload: PromptTemplatePromptInvokeAcknowledgement): void {
+function emitPromptInvocationAcknowledgement(
+	pi: ExtensionAPI,
+	ctx: Pick<ExtensionContext, "hasUI" | "ui"> | undefined,
+	payload: PromptTemplatePromptInvokeAcknowledgement,
+): void {
 	try {
 		pi.events.emit(PROMPT_TEMPLATE_PROMPT_INVOKE_ACK_EVENT, payload);
-	} catch {
-		// Invocation observers must not affect prompt execution.
+	} catch (error) {
+		notify(ctx, `Prompt invocation observer failed: ${error instanceof Error ? error.message : String(error)}`, "warning");
 	}
 }
 
@@ -216,12 +221,13 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 		const requestId = candidate.requestId;
 		const name = candidate.name;
 		if (typeof requestId !== "string" || typeof name !== "string") return;
+		const ctx = invocationCtx;
 
 		if (
 			candidate.protocolVersion !== PROMPT_TEMPLATE_PROMPT_INVOKE_PROTOCOL_VERSION ||
 			(candidate.args !== undefined && typeof candidate.args !== "string")
 		) {
-			emitPromptInvocationAcknowledgement(pi, {
+			emitPromptInvocationAcknowledgement(pi, ctx, {
 				protocolVersion: PROMPT_TEMPLATE_PROMPT_INVOKE_PROTOCOL_VERSION,
 				requestId,
 				name,
@@ -232,9 +238,8 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 		}
 
 		const request = candidate as unknown as PromptTemplatePromptInvokeRequest;
-		const ctx = invocationCtx;
 		if (!ctx) {
-			emitPromptInvocationAcknowledgement(pi, {
+			emitPromptInvocationAcknowledgement(pi, ctx, {
 				protocolVersion: PROMPT_TEMPLATE_PROMPT_INVOKE_PROTOCOL_VERSION,
 				requestId: request.requestId,
 				name: request.name,
@@ -244,7 +249,7 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 			return;
 		}
 		if (promptActive || loopState !== null || chainActive || !ctx.isIdle()) {
-			emitPromptInvocationAcknowledgement(pi, {
+			emitPromptInvocationAcknowledgement(pi, ctx, {
 				protocolVersion: PROMPT_TEMPLATE_PROMPT_INVOKE_PROTOCOL_VERSION,
 				requestId: request.requestId,
 				name: request.name,
@@ -257,7 +262,7 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 		refreshPrompts(ctx.cwd, ctx);
 		const prompt = prompts.get(request.name);
 		if (!prompt) {
-			emitPromptInvocationAcknowledgement(pi, {
+			emitPromptInvocationAcknowledgement(pi, ctx, {
 				protocolVersion: PROMPT_TEMPLATE_PROMPT_INVOKE_PROTOCOL_VERSION,
 				requestId: request.requestId,
 				name: request.name,
@@ -267,7 +272,7 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 			return;
 		}
 		if (prompt.chain) {
-			emitPromptInvocationAcknowledgement(pi, {
+			emitPromptInvocationAcknowledgement(pi, ctx, {
 				protocolVersion: PROMPT_TEMPLATE_PROMPT_INVOKE_PROTOCOL_VERSION,
 				requestId: request.requestId,
 				name: request.name,
@@ -277,7 +282,7 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 			return;
 		}
 		if (prompt.boomerang || prompt.loop !== undefined || extractLoopCount(request.args ?? "")) {
-			emitPromptInvocationAcknowledgement(pi, {
+			emitPromptInvocationAcknowledgement(pi, ctx, {
 				protocolVersion: PROMPT_TEMPLATE_PROMPT_INVOKE_PROTOCOL_VERSION,
 				requestId: request.requestId,
 				name: request.name,
@@ -289,7 +294,7 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 
 		const runId = randomUUID();
 		promptActive = true;
-		emitPromptInvocationAcknowledgement(pi, {
+		emitPromptInvocationAcknowledgement(pi, ctx, {
 			protocolVersion: PROMPT_TEMPLATE_PROMPT_INVOKE_PROTOCOL_VERSION,
 			requestId: request.requestId,
 			name: request.name,
@@ -1865,7 +1870,7 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 				runId,
 				name,
 			};
-			emitPromptLifecycleEvent(pi, PROMPT_TEMPLATE_PROMPT_STARTED_EVENT, started);
+			emitPromptLifecycleEvent(pi, ctx, PROMPT_TEMPLATE_PROMPT_STARTED_EVENT, started);
 
 			let status: PromptTemplatePromptStatus = "completed";
 			try {
@@ -1884,7 +1889,7 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 					changed: didIterationMakeChanges(entries),
 					...(lastText ? { lastText } : {}),
 				};
-				emitPromptLifecycleEvent(pi, PROMPT_TEMPLATE_PROMPT_FINISHED_EVENT, finished);
+				emitPromptLifecycleEvent(pi, ctx, PROMPT_TEMPLATE_PROMPT_FINISHED_EVENT, finished);
 			}
 		} finally {
 			promptActive = false;

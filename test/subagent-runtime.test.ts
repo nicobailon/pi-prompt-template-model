@@ -26,6 +26,9 @@ test("delegated live state updates and preserves existing fields", () => {
 	assert.deepEqual(state?.recentOutput, ["first"]);
 	assert.equal(state?.model, "anthropic/claude-sonnet-4");
 
+	state?.recentOutput.push("mutated snapshot");
+	assert.deepEqual(getDelegatedLiveState(requestId)?.recentOutput, ["first"]);
+
 	clearDelegatedLiveState(requestId);
 	assert.equal(getDelegatedLiveState(requestId), undefined);
 });

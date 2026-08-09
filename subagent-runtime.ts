@@ -223,7 +223,8 @@ export function appendDelegatedLiveOutput(requestId: string, line?: string): voi
 }
 
 export function getDelegatedLiveState(requestId: string): DelegatedSubagentLiveState | undefined {
-	return delegatedLiveState.get(requestId);
+	const state = delegatedLiveState.get(requestId);
+	return state ? structuredClone(state) : undefined;
 }
 
 export function clearDelegatedLiveState(requestId: string): void {

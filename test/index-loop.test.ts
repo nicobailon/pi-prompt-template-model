@@ -219,7 +219,7 @@ test("emits one defensive lifecycle pair for an inline prompt run", async () => 
 		pi.events.on(PROMPT_TEMPLATE_PROMPT_FINISHED_EVENT, (data) => lifecycle.push({ channel: PROMPT_TEMPLATE_PROMPT_FINISHED_EVENT, data }));
 		pi.events.on(PROMPT_TEMPLATE_PROMPT_STARTED_EVENT, () => { throw new Error("observer failure"); });
 		promptModelExtension(pi as never);
-		const { ctx } = createContext(cwd, pi);
+		const { ctx, getNotifications } = createContext(cwd, pi);
 		await pi.emit("session_start", {}, ctx);
 
 		await pi.commands.get("inline")!.handler("", ctx);
@@ -234,6 +234,7 @@ test("emits one defensive lifecycle pair for an inline prompt run", async () => 
 		assert.equal(lifecycle[0]!.data.runId, lifecycle[1]!.data.runId);
 		assert.equal(lifecycle[1]!.data.status, "completed");
 		assert.equal(lifecycle[1]!.data.changed, false);
+		assert.deepEqual(getNotifications(), ["Prompt lifecycle observer failed: observer failure"]);
 	});
 });
 
@@ -259,7 +260,7 @@ test("accepts invocation requests through the command path and correlates lifecy
 			resolveFinished(payload);
 		});
 		promptModelExtension(pi as never);
-		const { ctx } = createContext(cwd, pi);
+		const { ctx, getNotifications } = createContext(cwd, pi);
 		delete (ctx as any).waitForIdle;
 		delete (ctx as any).navigateTree;
 		let idle = true;
@@ -293,6 +294,7 @@ test("accepts invocation requests through the command path and correlates lifecy
 		assert.equal(finishedPayload.name, "invoke");
 		assert.equal(finishedPayload.status, "completed");
 		assert.equal(pi.userMessages.at(-1), "invoked hello world");
+		assert.deepEqual(getNotifications(), ["Prompt invocation observer failed: ack observer failure"]);
 	});
 });
 
