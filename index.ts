@@ -167,7 +167,12 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 	let storedCommandCtx: ExtensionCommandContext | null = null;
 	let invocationCtx: ExtensionContext | null = null;
 	let promptActive = false;
+	let compactionWait: Promise<void> | null = null;
+	let resolveCompactionWait: (() => void) | null = null;
+	let compactionReleaseTimer: ReturnType<typeof setTimeout> | undefined;
+	let compactionFallbackTimer: ReturnType<typeof setTimeout> | undefined;
 	const UNLIMITED_LOOP_CAP = 999;
+	const COMPACTION_WAIT_FALLBACK_MS = 5 * 60 * 1000;
 
 	const toolManager = createToolManager(pi, {
 		isActive: () => !!(loopState || chainActive),
@@ -191,9 +196,69 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 		pi.registerCommand(name, {
 			description: buildPromptCommandDescription(prompts.get(name)!),
 			handler: async (args, ctx) => {
+				await waitForDirectCommandTurn(ctx);
 				await runPromptCommand(name, args, ctx);
 			},
 		});
+	}
+
+	function ensureCompactionWait(signal?: AbortSignal): void {
+		if (!compactionWait) {
+			compactionWait = new Promise((resolve) => {
+				resolveCompactionWait = resolve;
+			});
+			compactionFallbackTimer = setTimeout(clearCompactionWait, COMPACTION_WAIT_FALLBACK_MS);
+		}
+		if (signal?.aborted) {
+			releaseCompactionWait();
+			return;
+		}
+		signal?.addEventListener("abort", releaseCompactionWait, { once: true });
+	}
+
+	function clearCompactionTimers(): void {
+		if (compactionReleaseTimer) clearTimeout(compactionReleaseTimer);
+		if (compactionFallbackTimer) clearTimeout(compactionFallbackTimer);
+		compactionReleaseTimer = undefined;
+		compactionFallbackTimer = undefined;
+	}
+
+	function releaseCompactionWait(): void {
+		if (!compactionWait || !resolveCompactionWait) return;
+		const currentWait = compactionWait;
+		const resolve = resolveCompactionWait;
+		resolveCompactionWait = null;
+		if (compactionReleaseTimer) clearTimeout(compactionReleaseTimer);
+		compactionReleaseTimer = setTimeout(() => {
+			if (compactionWait !== currentWait) return;
+			clearCompactionTimers();
+			compactionWait = null;
+			resolve();
+		}, 0);
+	}
+
+	function clearCompactionWait(): void {
+		clearCompactionTimers();
+		const resolve = resolveCompactionWait;
+		compactionWait = null;
+		resolveCompactionWait = null;
+		resolve?.();
+	}
+
+	async function waitForTrackedCompaction(): Promise<void> {
+		await (compactionWait ?? Promise.resolve());
+	}
+
+	async function waitForActiveTurn(ctx: ExtensionCommandContext): Promise<void> {
+		if (!ctx.signal) return;
+		if (ctx.isIdle()) return;
+		await ctx.waitForIdle();
+	}
+
+	async function waitForDirectCommandTurn(ctx: ExtensionCommandContext): Promise<void> {
+		await waitForTrackedCompaction();
+		await waitForActiveTurn(ctx);
+		await waitForTrackedCompaction();
 	}
 
 	function refreshPrompts(cwd: string, ctx?: ExtensionContext) {
@@ -1897,6 +1962,7 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 	}
 
 	function resetSessionScopedState(ctx: ExtensionContext) {
+		clearCompactionWait();
 		storedCommandCtx = null;
 		invocationCtx = ctx;
 		pendingSkillMessage = undefined;
@@ -1914,6 +1980,18 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 
 	pi.on("session_start", async (_event, ctx) => {
 		resetSessionScopedState(ctx);
+	});
+
+	pi.on("session_before_compact", async (event) => {
+		ensureCompactionWait(event.signal);
+	});
+
+	pi.on("session_compact", async () => {
+		releaseCompactionWait();
+	});
+
+	pi.on("session_shutdown", async () => {
+		clearCompactionWait();
 	});
 
 	pi.on("model_select", async (event) => {
@@ -2051,6 +2129,7 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 	pi.registerCommand("chain-prompts", {
 		description: "Chain prompt templates sequentially [template -> template -> ...]",
 		handler: async (args, ctx) => {
+			await waitForDirectCommandTurn(ctx);
 			await runChainCommand(args, ctx);
 		},
 	});

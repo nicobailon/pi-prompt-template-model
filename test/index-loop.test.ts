@@ -135,7 +135,7 @@ function createContext(
 	cwd: string,
 	pi: FakePi,
 	models: Array<{ provider: string; id: string }> = [ACTIVE_MODEL],
-	options?: { branchEntries?: () => any[]; waitForIdle?: () => Promise<void> },
+	options?: { branchEntries?: () => any[]; waitForIdle?: () => Promise<void>; isIdle?: () => boolean },
 ) {
 	let navigateCount = 0;
 	const notifications: string[] = [];
@@ -179,7 +179,7 @@ function createContext(
 			},
 		},
 		isIdle() {
-			return false;
+			return options?.isIdle ? options.isIdle() : false;
 		},
 		async waitForIdle() {
 			if (options?.waitForIdle) {
@@ -206,6 +206,35 @@ function createContext(
 		getNotifications: () => notifications,
 	};
 }
+
+test("direct prompt command waits for tracked compaction before sending user message", async () => {
+	await withTempHome(async (root) => {
+		const cwd = join(root, "project");
+		mkdirSync(join(cwd, ".pi", "prompts"), { recursive: true });
+		writeFileSync(join(cwd, ".pi", "prompts", "deslop.md"), `---\nmodel: ${MODEL_ID}\n---\ndeslop task`);
+
+		let idle = true;
+		const pi = new FakePi();
+		const { ctx } = createContext(cwd, pi, [ACTIVE_MODEL], { isIdle: () => idle });
+		pi.sendUserMessage = (content: string) => {
+			idle = false;
+			pi.userMessages.push(content);
+		};
+		promptModelExtension(pi as never);
+		await pi.emit("session_start", {}, ctx);
+		await pi.emit("session_before_compact", { signal: new AbortController().signal }, ctx);
+
+		const commandRun = pi.commands.get("deslop")!.handler("", ctx);
+		await Promise.resolve();
+		assert.equal(pi.userMessages.length, 0);
+
+		await pi.emit("session_compact", {}, ctx);
+		await commandRun;
+
+		assert.equal(pi.userMessages.length, 1);
+		assert.equal(pi.userMessages[0], "deslop task");
+	});
+});
 
 test("emits one defensive lifecycle pair for an inline prompt run", async () => {
 	await withTempHome(async (root) => {
