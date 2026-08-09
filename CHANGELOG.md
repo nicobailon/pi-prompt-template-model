@@ -7,7 +7,7 @@
 - Added the prompt invocation event channel for external orchestrators. Thanks @chrisgoddard for #18.
 
 ### Changed
-- Simplified internal argument parsing, model identity, and delegated-progress helpers without changing behavior.
+- Simplified internal argument parsing, model identity, delegated-progress helpers, chain parsing, frontmatter boolean parsing, and delegated-result rendering without changing behavior.
 
 ### Fixed
 - Restored single delegated prompts with pi-subagents 0.43+ by using its structured request, response, and cancellation contract. Thanks @auggie246 for reporting #19.
