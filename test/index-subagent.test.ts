@@ -233,6 +233,10 @@ test("delegated prompts honor default agent, runtime override, and inheritContex
 			promptModelExtension(pi as never);
 			await pi.emit("session_start", {}, ctx);
 			respondWithDelegatedResult(pi, (request) => {
+				assert.equal(request.ownerRunId, request.requestId);
+				assert.equal(request.nodeId, "single");
+				assert.deepEqual(request.result, { kind: "text" });
+				assert.equal(request.version, undefined);
 				testCase.checkRequest(request);
 			});
 
@@ -242,7 +246,7 @@ test("delegated prompts honor default agent, runtime override, and inheritContex
 	});
 });
 
-test("delegated prompts bind resolved skills through pi-subagents v1 skill names without changing task text", async () => {
+test("delegated prompts bind resolved skills through structured requests without changing task text", async () => {
 	await withTempHome(async (root) => {
 		const cwd = join(root, "host");
 		const delegatedCwd = join(root, "delegated");
@@ -261,7 +265,10 @@ test("delegated prompts bind resolved skills through pi-subagents v1 skill names
 		promptModelExtension(pi as never);
 		await pi.emit("session_start", {}, ctx);
 		respondWithDelegatedResult(pi, (request) => {
-			assert.equal(request.version, 1);
+			assert.equal(request.version, undefined);
+			assert.equal(request.ownerRunId, request.requestId);
+			assert.equal(request.nodeId, "single");
+			assert.deepEqual(request.result, { kind: "text" });
 			assert.equal(request.task, "do work");
 			assert.doesNotMatch(request.task, /Delegated (tmux|audit) body/);
 			assert.deepEqual(request.skill, ["tmux", "audit"]);
@@ -721,7 +728,10 @@ test("compare prompt expands count, applies taskSuffix, and runs a final applier
 			assert.equal(request.cwd, cwd);
 			assert.equal(request.worktree, undefined);
 			assert.equal(request.tasks, undefined);
-			assert.equal(request.version, 1);
+			assert.equal(request.version, undefined);
+			assert.equal(request.ownerRunId, request.requestId);
+			assert.equal(request.nodeId, "single");
+			assert.deepEqual(request.result, { kind: "text" });
 			assert.deepEqual(request.skill, ["audit"]);
 			assert.equal(request.skills, undefined);
 			assert.doesNotMatch(request.task ?? "", /Compare audit body/);

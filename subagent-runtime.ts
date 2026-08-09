@@ -5,7 +5,6 @@ export const PROMPT_TEMPLATE_SUBAGENT_UPDATE_EVENT = "prompt-template:subagent:u
 export const PROMPT_TEMPLATE_SUBAGENT_CANCEL_EVENT = "prompt-template:subagent:cancel";
 export const PROMPT_TEMPLATE_SUBAGENT_MESSAGE_TYPE = "prompt-template-subagent";
 export const DEFAULT_SUBAGENT_NAME = "delegate";
-export const SUBAGENT_DELEGATION_PROTOCOL_VERSION = 1 as const;
 
 export interface DelegatedSkillBinding {
 	name: string;
@@ -28,8 +27,9 @@ export interface DelegatedSubagentParallelResult {
 }
 
 export interface DelegatedSubagentRequest {
-	version?: typeof SUBAGENT_DELEGATION_PROTOCOL_VERSION;
 	requestId: string;
+	ownerRunId?: string;
+	nodeId?: string;
 	agent: string;
 	task: string;
 	tasks?: DelegatedSubagentTask[];
@@ -37,6 +37,7 @@ export interface DelegatedSubagentRequest {
 	model: string;
 	skill?: string[];
 	cwd: string;
+	result?: { kind: "text" };
 	worktree?: boolean;
 }
 
@@ -55,21 +56,17 @@ export interface DelegatedSubagentResponse {
 	changed?: boolean;
 }
 
-export interface SubagentDelegationV1Response {
-	version: typeof SUBAGENT_DELEGATION_PROTOCOL_VERSION;
+export interface StructuredSubagentDelegationResponse {
 	requestId: string;
+	ownerRunId?: string;
+	nodeId?: string;
 	status: string;
 	error?: string;
 	agent?: string;
 	model?: string;
-	output?: string;
-	effects?: {
-		fileMutation?: {
-			status?: string;
-			expected?: boolean;
-			attempted?: boolean;
-		};
-	};
+	result?:
+		| { kind: "text"; text: string }
+		| { kind: "structured"; value: unknown };
 }
 
 export interface DelegatedSubagentUpdate {
