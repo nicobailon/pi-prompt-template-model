@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Added
+- Added prompt lifecycle events for template start and finish, including correlated run IDs and completion status. Thanks @chrisgoddard for #17.
+
 ### Fixed
 - Restored single delegated prompts with pi-subagents 0.43+ by using its structured request, response, and cancellation contract. Thanks @auggie246 for reporting #19.
 

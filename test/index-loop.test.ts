@@ -5,6 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import promptModelExtension from "../index.ts";
 import {
+	PROMPT_TEMPLATE_PROMPT_FINISHED_EVENT,
+	PROMPT_TEMPLATE_PROMPT_STARTED_EVENT,
+	PROMPT_TEMPLATE_PROMPT_PROTOCOL_VERSION,
 	PROMPT_TEMPLATE_SUBAGENT_REQUEST_EVENT,
 	PROMPT_TEMPLATE_SUBAGENT_RESPONSE_EVENT,
 	PROMPT_TEMPLATE_SUBAGENT_STARTED_EVENT,
@@ -200,6 +203,62 @@ function createContext(
 		getNotifications: () => notifications,
 	};
 }
+
+test("emits one defensive lifecycle pair for an inline prompt run", async () => {
+	await withTempHome(async (root) => {
+		const cwd = join(root, "project");
+		mkdirSync(join(cwd, ".pi", "prompts"), { recursive: true });
+		writeFileSync(join(cwd, ".pi", "prompts", "inline.md"), `---\nmodel: ${MODEL_ID}\n---\ninline task`);
+
+		const pi = new FakePi();
+		const lifecycle: Array<{ channel: string; data: any }> = [];
+		pi.events.on(PROMPT_TEMPLATE_PROMPT_STARTED_EVENT, (data) => lifecycle.push({ channel: PROMPT_TEMPLATE_PROMPT_STARTED_EVENT, data }));
+		pi.events.on(PROMPT_TEMPLATE_PROMPT_FINISHED_EVENT, (data) => lifecycle.push({ channel: PROMPT_TEMPLATE_PROMPT_FINISHED_EVENT, data }));
+		pi.events.on(PROMPT_TEMPLATE_PROMPT_STARTED_EVENT, () => { throw new Error("observer failure"); });
+		promptModelExtension(pi as never);
+		const { ctx } = createContext(cwd, pi);
+		await pi.emit("session_start", {}, ctx);
+
+		await pi.commands.get("inline")!.handler("", ctx);
+
+		assert.equal(lifecycle.length, 2);
+		assert.equal(lifecycle[0]!.channel, PROMPT_TEMPLATE_PROMPT_STARTED_EVENT);
+		assert.equal(lifecycle[1]!.channel, PROMPT_TEMPLATE_PROMPT_FINISHED_EVENT);
+		assert.equal(lifecycle[0]!.data.protocolVersion, PROMPT_TEMPLATE_PROMPT_PROTOCOL_VERSION);
+		assert.equal(lifecycle[1]!.data.protocolVersion, PROMPT_TEMPLATE_PROMPT_PROTOCOL_VERSION);
+		assert.equal(lifecycle[0]!.data.name, "inline");
+		assert.equal(lifecycle[1]!.data.name, "inline");
+		assert.equal(lifecycle[0]!.data.runId, lifecycle[1]!.data.runId);
+		assert.equal(lifecycle[1]!.data.status, "completed");
+		assert.equal(lifecycle[1]!.data.changed, false);
+	});
+});
+
+test("chain template validation failure emits failed lifecycle status", async () => {
+	await withTempHome(async (root) => {
+		const cwd = join(root, "project");
+		mkdirSync(join(cwd, ".pi", "prompts"), { recursive: true });
+		writeFileSync(join(cwd, ".pi", "prompts", "pipeline.md"), "---\nchain: missing\n---\nignored");
+
+		const pi = new FakePi();
+		const lifecycle: Array<{ channel: string; data: any }> = [];
+		pi.events.on(PROMPT_TEMPLATE_PROMPT_STARTED_EVENT, (data) => lifecycle.push({ channel: PROMPT_TEMPLATE_PROMPT_STARTED_EVENT, data }));
+		pi.events.on(PROMPT_TEMPLATE_PROMPT_FINISHED_EVENT, (data) => lifecycle.push({ channel: PROMPT_TEMPLATE_PROMPT_FINISHED_EVENT, data }));
+		promptModelExtension(pi as never);
+		const { ctx, getNotifications } = createContext(cwd, pi);
+		await pi.emit("session_start", {}, ctx);
+
+		await pi.commands.get("pipeline")!.handler("", ctx);
+
+		assert.match(getNotifications().join("\n"), /Templates not found: missing/);
+		assert.equal(lifecycle.length, 2);
+		assert.equal(lifecycle[0]!.channel, PROMPT_TEMPLATE_PROMPT_STARTED_EVENT);
+		assert.equal(lifecycle[1]!.channel, PROMPT_TEMPLATE_PROMPT_FINISHED_EVENT);
+		assert.equal(lifecycle[0]!.data.runId, lifecycle[1]!.data.runId);
+		assert.equal(lifecycle[1]!.data.name, "pipeline");
+		assert.equal(lifecycle[1]!.data.status, "failed");
+	});
+});
 
 test("initializes prompt commands from session cwd, not process cwd", async () => {
 	await withTempHome(async (root) => {

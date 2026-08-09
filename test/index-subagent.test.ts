@@ -5,6 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import promptModelExtension from "../index.ts";
 import {
+	PROMPT_TEMPLATE_PROMPT_FINISHED_EVENT,
+	PROMPT_TEMPLATE_PROMPT_PROTOCOL_VERSION,
+	PROMPT_TEMPLATE_PROMPT_STARTED_EVENT,
 	PROMPT_TEMPLATE_SUBAGENT_REQUEST_EVENT,
 	PROMPT_TEMPLATE_SUBAGENT_RESPONSE_EVENT,
 	PROMPT_TEMPLATE_SUBAGENT_STARTED_EVENT,
@@ -188,6 +191,36 @@ function respondWithParallelDelegatedResult(pi: FakePi, setup?: (request: any) =
 		});
 	});
 }
+
+test("delegated prompt lifecycle finishes after PTM's follow-up turn is queued", async () => {
+	await withTempHome(async (root) => {
+		const cwd = join(root, "project");
+		mkdirSync(join(cwd, ".pi", "prompts"), { recursive: true });
+		writeFileSync(join(cwd, ".pi", "prompts", "delegate.md"), "---\nmodel: anthropic/claude-sonnet-4-20250514\nsubagent: true\n---\ndo work");
+
+		const pi = new FakePi();
+		const { ctx } = createContext(cwd, pi);
+		const lifecycle: Array<{ channel: string; data: any }> = [];
+		pi.events.on(PROMPT_TEMPLATE_PROMPT_STARTED_EVENT, (data) => lifecycle.push({ channel: PROMPT_TEMPLATE_PROMPT_STARTED_EVENT, data }));
+		pi.events.on(PROMPT_TEMPLATE_PROMPT_FINISHED_EVENT, (data) => lifecycle.push({ channel: PROMPT_TEMPLATE_PROMPT_FINISHED_EVENT, data }));
+		respondWithDelegatedResult(pi);
+		promptModelExtension(pi as never);
+		await pi.emit("session_start", {}, ctx);
+
+		await pi.commands.get("delegate")!.handler("", ctx);
+
+		assert.equal(lifecycle.length, 2);
+		assert.equal(lifecycle[0]!.channel, PROMPT_TEMPLATE_PROMPT_STARTED_EVENT);
+		assert.equal(lifecycle[1]!.channel, PROMPT_TEMPLATE_PROMPT_FINISHED_EVENT);
+		assert.equal(lifecycle[0]!.data.protocolVersion, PROMPT_TEMPLATE_PROMPT_PROTOCOL_VERSION);
+		assert.equal(lifecycle[1]!.data.protocolVersion, PROMPT_TEMPLATE_PROMPT_PROTOCOL_VERSION);
+		assert.equal(lifecycle[0]!.data.runId, lifecycle[1]!.data.runId);
+		assert.equal(lifecycle[1]!.data.status, "completed");
+		assert.equal(lifecycle[1]!.data.changed, true);
+		assert.equal(lifecycle[1]!.data.lastText, "Done");
+		assert.equal(pi.userMessages.at(-1), "[Delegated result: delegate]\n\nDone");
+	});
+});
 
 test("delegated prompts honor default agent, runtime override, and inheritContext", async () => {
 	await withTempHome(async (root) => {

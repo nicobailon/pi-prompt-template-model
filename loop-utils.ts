@@ -127,6 +127,11 @@ export function generateChainStepSummary(entries: SessionEntry[], stepLabel: str
 	return formatSummary(`Step ${stepNumber} — ${stepLabel}:`, entries);
 }
 
+export function getLastAssistantText(entries: SessionEntry[]): string | undefined {
+	const { lastAssistantText } = collectSummaryData(entries);
+	return lastAssistantText || undefined;
+}
+
 export function didIterationMakeChanges(entries: SessionEntry[]): boolean {
 	for (const entry of entries) {
 		if (entry.type === "message") {
