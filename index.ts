@@ -1206,7 +1206,7 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 		chainContextEnabled = false,
 		chainTemplateWorktree = false,
 		cliWorktree = false,
-	) {
+	): Promise<PromptTemplatePromptStatus> {
 		let worktreeEnabled = chainTemplateWorktree || cliWorktree;
 		if (worktreeEnabled && !steps.some(isParallelChainStep)) {
 			notify(ctx, `--worktree ignored: chain has no parallel() steps`, "warning");
@@ -1268,7 +1268,7 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 			return true;
 		};
 
-		if (!validateChainSteps()) return;
+		if (!validateChainSteps()) return "failed";
 
 		const originalModel = getCurrentModel(ctx);
 		const chainInheritedModel = originalModel;
@@ -1543,6 +1543,7 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 		if (chainErrorState.hasError) {
 			throw chainErrorState.error;
 		}
+		return chainAborted ? (ctx.signal?.aborted ? "cancelled" : "failed") : "completed";
 	}
 
 	async function executePromptCommand(name: string, args: string, ctx: ExtensionCommandContext): Promise<PromptTemplatePromptStatus> {
@@ -1626,7 +1627,7 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 			}
 
 			const cwdOverride = runtimeCwd ?? prompt.cwd;
-			await runSharedChainExecution(
+			return await runSharedChainExecution(
 				steps,
 				parseCommandArgs(cleanedArgs),
 				totalIterations,
@@ -1640,7 +1641,6 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 				prompt.worktree === true,
 				cliWorktree,
 			);
-			return ctx.signal?.aborted ? "cancelled" : "completed";
 		}
 
 		const promptOverrides: Partial<Pick<PromptWithModel, "models" | "inheritContext">> = {
