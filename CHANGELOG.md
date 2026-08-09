@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-08-09
+
 ### Added
 - Added prompt lifecycle events for template start and finish, including correlated run IDs and completion status. Thanks @chrisgoddard for #17.
 - Added the prompt invocation event channel for external orchestrators. Thanks @chrisgoddard for #18.

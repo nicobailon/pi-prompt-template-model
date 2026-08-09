@@ -1,6 +1,6 @@
 {
   "name": "pi-prompt-template-model",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "type": "module",
   "description": "Prompt template model selector extension for pi coding agent",
   "author": "Nico Bailon",
