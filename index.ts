@@ -18,7 +18,7 @@ import {
 } from "./args.ts";
 import { parseChainSteps, parseChainDeclaration, type ChainStep, type ChainStepOrParallel, type ParallelChainStep } from "./chain-parser.ts";
 import { generateBoomerangSummary, generateChainStepSummary, generateIterationSummary, didIterationMakeChanges, getIterationEntries, getLastAssistantText, wasIterationAborted } from "./loop-utils.ts";
-import { selectModelCandidate } from "./model-selection.ts";
+import { isSameModel, selectModelCandidate } from "./model-selection.ts";
 import { notify, summarizePromptDiagnostics, diagnosticsFingerprint } from "./notifications.ts";
 import { preparePromptExecution, renderPromptForResolvedModel } from "./prompt-execution.ts";
 import {
@@ -173,11 +173,6 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 		executeCommand: executeToolCommand,
 	});
 
-	function sameModel(a: Model<any> | undefined, b: Model<any> | undefined): boolean {
-		if (!a || !b) return a === b;
-		return a.provider === b.provider && a.id === b.id;
-	}
-
 	function getCurrentModel(ctx: Pick<ExtensionContext, "model">): Model<any> | undefined {
 		return runtimeModel ?? ctx.model;
 	}
@@ -215,10 +210,6 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 		lastDiagnostics = fingerprint;
 	}
 
-	function isPromptBusy(): boolean {
-		return promptActive || loopState !== null || chainActive;
-	}
-
 	function handlePromptInvocation(payload: unknown): void {
 		if (!payload || typeof payload !== "object") return;
 		const candidate = payload as Record<string, unknown>;
@@ -252,7 +243,7 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 			});
 			return;
 		}
-		if (isPromptBusy() || !ctx.isIdle()) {
+		if (promptActive || loopState !== null || chainActive || !ctx.isIdle()) {
 			emitPromptInvocationAcknowledgement(pi, {
 				protocolVersion: PROMPT_TEMPLATE_PROMPT_INVOKE_PROTOCOL_VERSION,
 				requestId: request.requestId,
@@ -585,7 +576,7 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 
 		if (promptTurnRestore) {
 			const currentModel = getCurrentModel(ctx);
-			if (promptTurnRestore.originalModel && currentModel && !sameModel(promptTurnRestore.originalModel, currentModel)) {
+			if (promptTurnRestore.originalModel && currentModel && !isSameModel(promptTurnRestore.originalModel, currentModel)) {
 				previousModel = promptTurnRestore.originalModel;
 				previousThinking = promptTurnRestore.originalThinking;
 			}
@@ -619,7 +610,7 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 		const shouldRestoreThinking =
 			originalThinking !== undefined && (currentThinking === undefined || currentThinking !== originalThinking);
 
-		if (originalModel && !sameModel(originalModel, currentModel)) {
+		if (originalModel && !isSameModel(originalModel, currentModel)) {
 			const restoredModel = await pi.setModel(originalModel);
 			if (restoredModel) {
 				runtimeModel = originalModel;

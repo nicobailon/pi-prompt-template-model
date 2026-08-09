@@ -1,6 +1,6 @@
 import type { Model } from "@earendil-works/pi-ai";
 import { substituteArgs } from "./args.ts";
-import { getResolvedModelRef, selectModelCandidate, type ModelSelectionOptions, type RegistryLike, type SelectedModelCandidate } from "./model-selection.ts";
+import { getResolvedModelRef, isSameModel, selectModelCandidate, type ModelSelectionOptions, type RegistryLike, type SelectedModelCandidate } from "./model-selection.ts";
 import type { PromptWithModel } from "./prompt-loader.ts";
 import { renderTemplateConditionals } from "./template-conditionals.ts";
 
@@ -44,11 +44,6 @@ export function renderPromptForResolvedModel(
 	};
 }
 
-function sameModel(a: Model<any> | undefined, b: Model<any> | undefined): boolean {
-	if (!a || !b) return a === b;
-	return a.provider === b.provider && a.id === b.id;
-}
-
 export async function preparePromptExecution(
 	prompt: Pick<PromptWithModel, "name" | "content" | "models">,
 	args: string[],
@@ -68,7 +63,7 @@ export async function preparePromptExecution(
 				}
 				return {
 					model: inheritedModel,
-					alreadyActive: sameModel(currentModel, inheritedModel),
+					alreadyActive: isSameModel(currentModel, inheritedModel),
 				};
 			})()
 			: await selectModelCandidate(prompt.models, currentModel, modelRegistry, options);
