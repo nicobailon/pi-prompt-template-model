@@ -18,7 +18,6 @@ import {
 	PROMPT_TEMPLATE_SUBAGENT_RESPONSE_EVENT,
 	PROMPT_TEMPLATE_SUBAGENT_STARTED_EVENT,
 	PROMPT_TEMPLATE_SUBAGENT_UPDATE_EVENT,
-	SUBAGENT_DELEGATION_PROTOCOL_VERSION,
 	updateDelegatedLiveState,
 	type DelegatedSkillBinding,
 	type DelegatedSubagentParallelResult,
@@ -27,7 +26,7 @@ import {
 	type DelegatedSubagentTask,
 	type DelegatedSubagentTaskProgress,
 	type DelegatedSubagentUpdate,
-	type SubagentDelegationV1Response,
+	type StructuredSubagentDelegationResponse,
 } from "./subagent-runtime.ts";
 import type { SubagentOverride } from "./args.ts";
 import { createDelegatedProgressWidget, DELEGATED_WIDGET_KEY } from "./subagent-widget.ts";
@@ -157,21 +156,14 @@ function skillNamesFromBindings(skills: DelegatedSkillBinding[] | undefined): st
 	return skills.map((skill) => skill.name);
 }
 
-function isVersionedV1Response(payload: Partial<SubagentDelegationV1Response>): payload is SubagentDelegationV1Response {
-	return payload.version === SUBAGENT_DELEGATION_PROTOCOL_VERSION && typeof payload.status === "string";
-}
-
-function versionedResponseChanged(payload: SubagentDelegationV1Response): boolean {
-	const fileMutation = payload.effects?.fileMutation;
-	return fileMutation?.attempted === true || fileMutation?.status === "observed";
-}
-
 function normalizeDelegatedResponse(data: unknown, request: DelegatedSubagentRequest): DelegatedSubagentResponse | undefined {
 	if (!data || typeof data !== "object") return undefined;
-	const payload = data as Partial<DelegatedSubagentResponse & SubagentDelegationV1Response>;
+	const payload = data as Partial<DelegatedSubagentResponse & StructuredSubagentDelegationResponse>;
 	if (payload.requestId !== request.requestId) return undefined;
-	if (isVersionedV1Response(payload)) {
-		const output = typeof payload.output === "string" ? payload.output : "";
+	if (typeof payload.status === "string") {
+		const output = payload.result?.kind === "text" && typeof payload.result.text === "string"
+			? payload.result.text
+			: "";
 		const isError = payload.status !== "completed";
 		return {
 			requestId: payload.requestId,
@@ -183,10 +175,21 @@ function normalizeDelegatedResponse(data: unknown, request: DelegatedSubagentReq
 			messages: buildAssistantTextMessage(output),
 			isError,
 			errorText: payload.error ?? (isError ? payload.status : undefined),
-			changed: versionedResponseChanged(payload),
+			changed: false,
 		};
 	}
 	return payload as DelegatedSubagentResponse;
+}
+
+function delegatedCancelPayload(request: DelegatedSubagentRequest, reason: string): Record<string, string> {
+	if (request.ownerRunId && request.nodeId) {
+		return {
+			requestId: request.requestId,
+			ownerRunId: request.ownerRunId,
+			nodeId: request.nodeId,
+		};
+	}
+	return { requestId: request.requestId, reason };
 }
 
 function resolveDelegationName(prompt: PromptWithModel, override?: SubagentOverride): string | undefined {
@@ -533,10 +536,7 @@ async function requestDelegatedRun(
 		const onTerminalInput = ctx.mode === "tui"
 			? ctx.ui.onTerminalInput((input) => {
 				if (!matchesKey(input, Key.escape)) return undefined;
-				pi.events.emit(PROMPT_TEMPLATE_SUBAGENT_CANCEL_EVENT, {
-					requestId: request.requestId,
-					reason: "escape",
-				});
+				pi.events.emit(PROMPT_TEMPLATE_SUBAGENT_CANCEL_EVENT, delegatedCancelPayload(request, "escape"));
 				finish(() => reject(new Error("Delegated prompt cancelled.")));
 				return { consume: true };
 			})
@@ -561,10 +561,7 @@ async function requestDelegatedRun(
 		};
 
 		onAbort = () => {
-			pi.events.emit(PROMPT_TEMPLATE_SUBAGENT_CANCEL_EVENT, {
-				requestId: request.requestId,
-				reason: "abort",
-			});
+			pi.events.emit(PROMPT_TEMPLATE_SUBAGENT_CANCEL_EVENT, delegatedCancelPayload(request, "abort"));
 			finish(() => reject(new Error("Delegated prompt cancelled.")));
 		};
 		if (signal) {
@@ -618,9 +615,17 @@ export async function executeSubagentPromptStep(options: DelegatedPromptOptions)
 	}
 
 	const requestSkill = isParallelRequest ? undefined : skillNamesFromBindings(preparedTasks[0]!.skills);
+	const requestId = randomUUID();
 	const request: DelegatedSubagentRequest = {
-		...(requestSkill ? { version: SUBAGENT_DELEGATION_PROTOCOL_VERSION, skill: requestSkill } : {}),
-		requestId: randomUUID(),
+		requestId,
+		...(!isParallelRequest
+			? {
+				ownerRunId: requestId,
+				nodeId: "single",
+				result: { kind: "text" as const },
+				...(requestSkill ? { skill: requestSkill } : {}),
+			}
+			: {}),
 		agent: preparedTasks[0]!.agent,
 		task: preparedTasks[0]!.task,
 		...(isParallelRequest

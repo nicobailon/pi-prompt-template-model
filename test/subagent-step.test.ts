@@ -159,24 +159,28 @@ test("executeSubagentPromptStep returns delegated change info", async () => {
 	});
 });
 
-test("executeSubagentPromptStep accepts pi-subagents v1 response output and effects", async () => {
+test("executeSubagentPromptStep uses structured skill requests and text responses", async () => {
 	await withDelegationBridge(async (root) => {
 		const pi = createPi();
 		const ctx = createCtx(root);
-		let requestSkill: unknown;
+		let delegatedRequest: any;
 
 		pi.events.on(PROMPT_TEMPLATE_SUBAGENT_REQUEST_EVENT, (data) => {
 			const request = data as any;
-			requestSkill = request.skill;
-			pi.events.emit(PROMPT_TEMPLATE_SUBAGENT_STARTED_EVENT, { version: 1, requestId: request.requestId });
-			pi.events.emit(PROMPT_TEMPLATE_SUBAGENT_RESPONSE_EVENT, {
-				version: 1,
+			delegatedRequest = request;
+			pi.events.emit(PROMPT_TEMPLATE_SUBAGENT_STARTED_EVENT, {
 				requestId: request.requestId,
+				ownerRunId: request.ownerRunId,
+				nodeId: request.nodeId,
+			});
+			pi.events.emit(PROMPT_TEMPLATE_SUBAGENT_RESPONSE_EVENT, {
+				requestId: request.requestId,
+				ownerRunId: request.ownerRunId,
+				nodeId: request.nodeId,
 				status: "completed",
 				agent: request.agent,
 				model: request.model,
-				output: "Done from v1.",
-				effects: { fileMutation: { status: "observed", attempted: true } },
+				result: { kind: "text", text: "Done from structured." },
 			});
 		});
 
@@ -192,9 +196,13 @@ test("executeSubagentPromptStep accepts pi-subagents v1 response output and effe
 			],
 		});
 
-		assert.deepEqual(requestSkill, ["audit", "tmux"]);
-		assert.equal(result?.text, "Done from v1.");
-		assert.equal(result?.changed, true);
+		assert.equal(delegatedRequest.ownerRunId, delegatedRequest.requestId);
+		assert.equal(delegatedRequest.nodeId, "single");
+		assert.deepEqual(delegatedRequest.result, { kind: "text" });
+		assert.deepEqual(delegatedRequest.skill, ["audit", "tmux"]);
+		assert.equal(delegatedRequest.version, undefined);
+		assert.equal(result?.text, "Done from structured.");
+		assert.equal(result?.changed, false);
 		assert.equal(pi.customMessages.length, 1);
 	});
 });
@@ -260,18 +268,23 @@ test("executeSubagentPromptStep forwards custom agents to the loaded bridge", as
 	});
 });
 
-test("executeSubagentPromptStep fails on delegated error response", async () => {
+test("executeSubagentPromptStep surfaces structured delegation errors", async () => {
 	await withDelegationBridge(async (root) => {
 		const pi = createPi();
 		const ctx = createCtx(root);
 		pi.events.on(PROMPT_TEMPLATE_SUBAGENT_REQUEST_EVENT, (data) => {
 			const request = data as any;
-			pi.events.emit(PROMPT_TEMPLATE_SUBAGENT_STARTED_EVENT, { requestId: request.requestId });
+			pi.events.emit(PROMPT_TEMPLATE_SUBAGENT_STARTED_EVENT, {
+				requestId: request.requestId,
+				ownerRunId: request.ownerRunId,
+				nodeId: request.nodeId,
+			});
 			pi.events.emit(PROMPT_TEMPLATE_SUBAGENT_RESPONSE_EVENT, {
-				...request,
-				messages: [],
-				isError: true,
-				errorText: "boom",
+				requestId: request.requestId,
+				ownerRunId: request.ownerRunId,
+				nodeId: request.nodeId,
+				status: "invalid_request",
+				error: "Delegation ownerRunId is invalid.",
 			});
 		});
 
@@ -284,7 +297,7 @@ test("executeSubagentPromptStep fails on delegated error response", async () => 
 					ctx,
 					currentModel: ctx.model,
 				}),
-			/boom/,
+			/Delegation ownerRunId is invalid\./,
 		);
 	});
 });
@@ -389,18 +402,19 @@ test("executeSubagentPromptStep preserves missing-agent errors from the loaded b
 	});
 });
 
-test("executeSubagentPromptStep emits cancel on escape in UI mode", async () => {
+test("executeSubagentPromptStep emits structured cancel on escape in UI mode", async () => {
 	await withDelegationBridge(async (root) => {
 		const pi = createPi();
 		const { ctx, sendInput } = createInteractiveCtx(root);
-		let cancelledRequestId: string | undefined;
+		let request: any;
+		let cancelPayload: unknown;
 
 		pi.events.on(PROMPT_TEMPLATE_SUBAGENT_CANCEL_EVENT, (data) => {
-			cancelledRequestId = (data as { requestId?: string }).requestId;
+			cancelPayload = data;
 		});
 
 		pi.events.on(PROMPT_TEMPLATE_SUBAGENT_REQUEST_EVENT, (data) => {
-			const request = data as any;
+			request = data as any;
 			pi.events.emit(PROMPT_TEMPLATE_SUBAGENT_STARTED_EVENT, { requestId: request.requestId });
 			setTimeout(() => sendInput("\x1b"), 0);
 		});
@@ -416,23 +430,28 @@ test("executeSubagentPromptStep emits cancel on escape in UI mode", async () => 
 				}),
 			/cancelled/i,
 		);
-		assert.ok(cancelledRequestId);
+		assert.deepEqual(cancelPayload, {
+			requestId: request.requestId,
+			ownerRunId: request.ownerRunId,
+			nodeId: request.nodeId,
+		});
 	});
 });
 
-test("executeSubagentPromptStep emits cancel on abort signal", async () => {
+test("executeSubagentPromptStep emits structured cancel on abort signal", async () => {
 	await withDelegationBridge(async (root) => {
 		const pi = createPi();
 		const ctx = createCtx(root);
 		const controller = new AbortController();
-		let cancelledRequestId: string | undefined;
+		let request: any;
+		let cancelPayload: unknown;
 
 		pi.events.on(PROMPT_TEMPLATE_SUBAGENT_CANCEL_EVENT, (data) => {
-			cancelledRequestId = (data as { requestId?: string }).requestId;
+			cancelPayload = data;
 		});
 
 		pi.events.on(PROMPT_TEMPLATE_SUBAGENT_REQUEST_EVENT, (data) => {
-			const request = data as any;
+			request = data as any;
 			pi.events.emit(PROMPT_TEMPLATE_SUBAGENT_STARTED_EVENT, { requestId: request.requestId });
 			setTimeout(() => controller.abort(), 0);
 		});
@@ -449,7 +468,11 @@ test("executeSubagentPromptStep emits cancel on abort signal", async () => {
 				}),
 			/cancelled/i,
 		);
-		assert.ok(cancelledRequestId);
+		assert.deepEqual(cancelPayload, {
+			requestId: request.requestId,
+			ownerRunId: request.ownerRunId,
+			nodeId: request.nodeId,
+		});
 	});
 });
 
