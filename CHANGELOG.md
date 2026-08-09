@@ -11,6 +11,7 @@
 - Prompt observer failures now report non-fatal warnings, and delegated live-state reads now return snapshots.
 
 ### Fixed
+- Prompt slash commands now wait for active compaction and busy turns before sending their generated prompt, so commands like `/deslop` can be queued safely during compaction.
 - Restored single delegated prompts with pi-subagents 0.43+ by using its structured request, response, and cancellation contract. Thanks @auggie246 for reporting #19.
 
 ## [0.11.0] - 2026-08-04

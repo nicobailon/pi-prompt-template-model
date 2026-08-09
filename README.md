@@ -47,7 +47,7 @@ skill: tmux
 Start a Python REPL session and help me debug: $@
 ```
 
-Run `/debug-python some issue` and the agent switches to Sonnet, receives the tmux skill as context, and starts working. When it finishes, your previous model is restored.
+Run `/debug-python some issue` and the agent switches to Sonnet, receives the tmux skill as context, and starts working. When it finishes, your previous model is restored. If Pi is compacting or finishing a turn, the slash command waits until the session can accept the generated prompt.
 
 ## Prompt Discovery
 
