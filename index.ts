@@ -252,7 +252,7 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 			});
 			return;
 		}
-		if (isPromptBusy()) {
+		if (isPromptBusy() || !ctx.isIdle()) {
 			emitPromptInvocationAcknowledgement(pi, {
 				protocolVersion: PROMPT_TEMPLATE_PROMPT_INVOKE_PROTOCOL_VERSION,
 				requestId: request.requestId,

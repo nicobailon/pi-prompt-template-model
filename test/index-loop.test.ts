@@ -262,11 +262,12 @@ test("accepts invocation requests through the command path and correlates lifecy
 		const { ctx } = createContext(cwd, pi);
 		delete (ctx as any).waitForIdle;
 		delete (ctx as any).navigateTree;
-		let idle = false;
+		let idle = true;
 		ctx.isIdle = () => idle;
 		const sendUserMessage = pi.sendUserMessage.bind(pi);
 		pi.sendUserMessage = (content: string) => {
 			sendUserMessage(content);
+			idle = false;
 			setTimeout(() => { idle = true; }, 0);
 		};
 		await pi.emit("session_start", {}, ctx);
@@ -295,6 +296,39 @@ test("accepts invocation requests through the command path and correlates lifecy
 	});
 });
 
+test("refuses invocation requests while the Pi session is non-idle", async () => {
+	await withTempHome(async (root) => {
+		const cwd = join(root, "project");
+		mkdirSync(join(cwd, ".pi", "prompts"), { recursive: true });
+		writeFileSync(join(cwd, ".pi", "prompts", "invoke.md"), `---\nmodel: ${MODEL_ID}\n---\ninvoked`);
+
+		const pi = new FakePi();
+		const acknowledgements: any[] = [];
+		const lifecycle: any[] = [];
+		pi.events.on(PROMPT_TEMPLATE_PROMPT_INVOKE_ACK_EVENT, (payload) => acknowledgements.push(payload));
+		pi.events.on(PROMPT_TEMPLATE_PROMPT_STARTED_EVENT, (payload) => lifecycle.push(payload));
+		pi.events.on(PROMPT_TEMPLATE_PROMPT_FINISHED_EVENT, (payload) => lifecycle.push(payload));
+		promptModelExtension(pi as never);
+		const { ctx } = createContext(cwd, pi);
+		await pi.emit("session_start", {}, ctx);
+
+		pi.events.emit(PROMPT_TEMPLATE_PROMPT_INVOKE_REQUEST_EVENT, {
+			protocolVersion: PROMPT_TEMPLATE_PROMPT_INVOKE_PROTOCOL_VERSION,
+			requestId: "graph-session-busy",
+			name: "invoke",
+		});
+
+		assert.deepEqual(acknowledgements, [{
+			protocolVersion: PROMPT_TEMPLATE_PROMPT_INVOKE_PROTOCOL_VERSION,
+			requestId: "graph-session-busy",
+			name: "invoke",
+			accepted: false,
+			reason: "busy",
+		}]);
+		assert.deepEqual(lifecycle, []);
+	});
+});
+
 test("refuses unknown invocation requests without starting a run", async () => {
 	await withTempHome(async (root) => {
 		const cwd = join(root, "project");
@@ -307,6 +341,7 @@ test("refuses unknown invocation requests without starting a run", async () => {
 		pi.events.on(PROMPT_TEMPLATE_PROMPT_FINISHED_EVENT, (payload) => lifecycle.push(payload));
 		promptModelExtension(pi as never);
 		const { ctx } = createContext(cwd, pi);
+		ctx.isIdle = () => true;
 		await pi.emit("session_start", {}, ctx);
 
 		pi.events.emit(PROMPT_TEMPLATE_PROMPT_INVOKE_REQUEST_EVENT, {
@@ -353,6 +388,13 @@ test("refuses invocation requests while a prompt run is active", async () => {
 		});
 		promptModelExtension(pi as never);
 		const { ctx } = createContext(cwd, pi);
+		let idle = true;
+		ctx.isIdle = () => idle;
+		const sendUserMessage = pi.sendUserMessage.bind(pi);
+		pi.sendUserMessage = (content: string) => {
+			sendUserMessage(content);
+			idle = false;
+		};
 		await pi.emit("session_start", {}, ctx);
 
 		pi.events.emit(PROMPT_TEMPLATE_PROMPT_INVOKE_REQUEST_EVENT, {
@@ -387,6 +429,7 @@ test("refuses chain-template invocation requests without starting a run", async 
 		pi.events.on(PROMPT_TEMPLATE_PROMPT_FINISHED_EVENT, (payload) => lifecycle.push(payload));
 		promptModelExtension(pi as never);
 		const { ctx } = createContext(cwd, pi);
+		ctx.isIdle = () => true;
 		await pi.emit("session_start", {}, ctx);
 
 		pi.events.emit(PROMPT_TEMPLATE_PROMPT_INVOKE_REQUEST_EVENT, {
@@ -424,6 +467,7 @@ test("chain template validation failure emits failed lifecycle status", async ()
 		assert.equal(lifecycle[0]!.data.runId, lifecycle[1]!.data.runId);
 		assert.equal(lifecycle[1]!.data.name, "pipeline");
 		assert.equal(lifecycle[1]!.data.status, "failed");
+	});
 });
 
 test("refuses invocation while a direct chain command is finishing", async () => {
