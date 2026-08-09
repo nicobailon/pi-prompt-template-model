@@ -136,7 +136,6 @@ export function renderDelegatedSubagentResult(
 	container.addChild(new Spacer(1));
 	const box = new Box(1, 1, (text: string) => theme.bg("toolSuccessBg", text));
 
-	// Header: ok worker [fork] | 3 tools, 496 tok
 	const icon = theme.fg("success", "ok");
 	const stats = hasParallelResults
 		? `${parallelResults.length} task${parallelResults.length === 1 ? "" : "s"}, ${toolCount} tool${toolCount === 1 ? "" : "s"}, ${tokensLabel}`
@@ -144,7 +143,6 @@ export function renderDelegatedSubagentResult(
 	box.addChild(new Text(`${icon} ${theme.fg("toolTitle", theme.bold(agent))}${context} | ${stats}`, 0, 0));
 	box.addChild(new Spacer(1));
 
-	// Task preview
 	if (details?.task) {
 		const taskPreview = details.task.length > 120 ? `${details.task.slice(0, 120)}...` : details.task;
 		box.addChild(new Text(theme.fg("dim", `Task: ${taskPreview}`), 0, 0));
@@ -181,7 +179,6 @@ export function renderDelegatedSubagentResult(
 			box.addChild(new Spacer(1));
 		}
 	} else {
-		// Tool calls
 		if (toolCalls.length > 0) {
 			const showCalls = options.expanded ? toolCalls : toolCalls.slice(0, 5);
 			for (const call of showCalls) {
@@ -193,7 +190,6 @@ export function renderDelegatedSubagentResult(
 			box.addChild(new Spacer(1));
 		}
 
-		// Output text
 		if (text) {
 			const lines = text.split("\n");
 			if (options.expanded || lines.length <= PREVIEW_LINES) {
@@ -206,7 +202,6 @@ export function renderDelegatedSubagentResult(
 		}
 	}
 
-	// Stats footer
 	const statsLine = `${usage.turns} turn${usage.turns === 1 ? "" : "s"} in:${usage.input} out:${usage.output} R${formatTokensShort(usage.cacheRead)} W${formatTokensShort(usage.cacheWrite)}${usage.cost ? ` $${usage.cost.toFixed(4)}` : ""} ${usage.model ?? details?.model ?? ""}`;
 	box.addChild(new Text(theme.fg("dim", statsLine), 0, 0));
 

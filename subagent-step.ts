@@ -291,10 +291,6 @@ function formatParallelProgressStatus(update: DelegatedSubagentUpdate): string |
 	return `parallel ${completed}/${update.taskProgress.length} running`;
 }
 
-function hasOwn<T extends object>(value: T, key: PropertyKey): boolean {
-	return Object.prototype.hasOwnProperty.call(value, key);
-}
-
 function sanitizeOutputLines(lines: string[] | undefined): string[] {
 	if (!lines || lines.length === 0) return [];
 	return lines.filter((line): line is string => typeof line === "string" && line.trim() && line.trim() !== "(running...)");
@@ -370,8 +366,8 @@ function mergeTaskProgress(
 			index: targetIndex,
 			agent: current.agent,
 			status: entry.status ?? current.status,
-			currentTool: hasOwn(entry, "currentTool") ? entry.currentTool : current.currentTool,
-			currentToolArgs: hasOwn(entry, "currentToolArgs") ? entry.currentToolArgs : current.currentToolArgs,
+			currentTool: Object.hasOwn(entry, "currentTool") ? entry.currentTool : current.currentTool,
+			currentToolArgs: Object.hasOwn(entry, "currentToolArgs") ? entry.currentToolArgs : current.currentToolArgs,
 			recentOutput: entry.recentOutput ?? current.recentOutput,
 			recentOutputLines: entry.recentOutputLines ?? current.recentOutputLines,
 			recentTools: entry.recentTools ?? current.recentTools,

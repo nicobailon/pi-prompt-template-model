@@ -30,7 +30,8 @@ export interface ModelSelectionOptions {
 	scopedModels?: readonly ScopedModelLike[];
 }
 
-function isSameModel(a: Model<any>, b: Model<any>): boolean {
+export function isSameModel(a: Model<any> | undefined, b: Model<any> | undefined): boolean {
+	if (!a || !b) return a === b;
 	return a.provider === b.provider && a.id === b.id;
 }
 
