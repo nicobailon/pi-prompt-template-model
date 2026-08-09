@@ -276,104 +276,38 @@ function normalizeModelSpecs(
 	return models;
 }
 
-function normalizeRestore(
-	value: unknown,
-	filePath: string,
-	source: PromptSource,
-	diagnostics: PromptLoaderDiagnostic[],
-): boolean {
-	if (value === undefined) return true;
-	if (typeof value === "boolean") return value;
-	if (typeof value === "string") {
-		const normalized = value.trim().toLowerCase();
-		if (normalized === "true") return true;
-		if (normalized === "false") return false;
-	}
+const BOOLEAN_FRONTMATTER_VALUES = new Map<string, boolean>([
+	["true", true],
+	["false", false],
+]);
 
-	diagnostics.push(
-		createDiagnostic(
-			"invalid-restore",
-			filePath,
-			source,
-			`Using default restore=true for ${filePath}: frontmatter field "restore" must be true or false.`,
-		),
-	);
-	return true;
+function parseBooleanValue(value: unknown): boolean | undefined {
+	if (typeof value === "boolean") return value;
+	if (typeof value !== "string") return undefined;
+	return BOOLEAN_FRONTMATTER_VALUES.get(value.trim().toLowerCase());
 }
 
-function normalizeFresh(
+function normalizeBooleanField(
 	value: unknown,
+	field: "restore" | "fresh" | "rotate" | "boomerang" | "converge" | "worktree",
+	defaultValue: boolean,
 	filePath: string,
 	source: PromptSource,
 	diagnostics: PromptLoaderDiagnostic[],
 ): boolean {
-	if (value === undefined) return false;
-	if (typeof value === "boolean") return value;
-	if (typeof value === "string") {
-		const normalized = value.trim().toLowerCase();
-		if (normalized === "true") return true;
-		if (normalized === "false") return false;
-	}
+	if (value === undefined) return defaultValue;
+	const parsed = parseBooleanValue(value);
+	if (parsed !== undefined) return parsed;
 
 	diagnostics.push(
 		createDiagnostic(
-			"invalid-fresh",
+			`invalid-${field}`,
 			filePath,
 			source,
-			`Using default fresh=false for ${filePath}: frontmatter field "fresh" must be true or false.`,
+			`Using default ${field}=${defaultValue} for ${filePath}: frontmatter field "${field}" must be true or false.`,
 		),
 	);
-	return false;
-}
-
-function normalizeRotate(
-	value: unknown,
-	filePath: string,
-	source: PromptSource,
-	diagnostics: PromptLoaderDiagnostic[],
-): boolean {
-	if (value === undefined) return false;
-	if (typeof value === "boolean") return value;
-	if (typeof value === "string") {
-		const normalized = value.trim().toLowerCase();
-		if (normalized === "true") return true;
-		if (normalized === "false") return false;
-	}
-
-	diagnostics.push(
-		createDiagnostic(
-			"invalid-rotate",
-			filePath,
-			source,
-			`Using default rotate=false for ${filePath}: frontmatter field "rotate" must be true or false.`,
-		),
-	);
-	return false;
-}
-
-function normalizeBoomerang(
-	value: unknown,
-	filePath: string,
-	source: PromptSource,
-	diagnostics: PromptLoaderDiagnostic[],
-): boolean {
-	if (value === undefined) return false;
-	if (typeof value === "boolean") return value;
-	if (typeof value === "string") {
-		const normalized = value.trim().toLowerCase();
-		if (normalized === "true") return true;
-		if (normalized === "false") return false;
-	}
-
-	diagnostics.push(
-		createDiagnostic(
-			"invalid-boomerang",
-			filePath,
-			source,
-			`Using default boomerang=false for ${filePath}: frontmatter field "boomerang" must be true or false.`,
-		),
-	);
-	return false;
+	return defaultValue;
 }
 
 function normalizeLoop(
@@ -582,12 +516,8 @@ function normalizeDeterministicNonInteractive(
 	diagnostics: PromptLoaderDiagnostic[],
 ): boolean {
 	if (value === undefined) return true;
-	if (typeof value === "boolean") return value;
-	if (typeof value === "string") {
-		const normalized = value.trim().toLowerCase();
-		if (normalized === "true") return true;
-		if (normalized === "false") return false;
-	}
+	const parsed = parseBooleanValue(value);
+	if (parsed !== undefined) return parsed;
 
 	diagnostics.push(
 		createDiagnostic(
@@ -1112,56 +1042,6 @@ function pushLegacyCompareFieldDiagnostic(
 	);
 }
 
-function normalizeConverge(
-	value: unknown,
-	filePath: string,
-	source: PromptSource,
-	diagnostics: PromptLoaderDiagnostic[],
-): boolean {
-	if (value === undefined) return true;
-	if (typeof value === "boolean") return value;
-	if (typeof value === "string") {
-		const normalized = value.trim().toLowerCase();
-		if (normalized === "true") return true;
-		if (normalized === "false") return false;
-	}
-
-	diagnostics.push(
-		createDiagnostic(
-			"invalid-converge",
-			filePath,
-			source,
-			`Using default converge=true for ${filePath}: frontmatter field "converge" must be true or false.`,
-		),
-	);
-	return true;
-}
-
-function normalizeWorktree(
-	value: unknown,
-	filePath: string,
-	source: PromptSource,
-	diagnostics: PromptLoaderDiagnostic[],
-): boolean {
-	if (value === undefined) return false;
-	if (typeof value === "boolean") return value;
-	if (typeof value === "string") {
-		const normalized = value.trim().toLowerCase();
-		if (normalized === "true") return true;
-		if (normalized === "false") return false;
-	}
-
-	diagnostics.push(
-		createDiagnostic(
-			"invalid-worktree",
-			filePath,
-			source,
-			`Using default worktree=false for ${filePath}: frontmatter field "worktree" must be true or false.`,
-		),
-	);
-	return false;
-}
-
 function normalizeSubagent(
 	value: unknown,
 	filePath: string,
@@ -1246,12 +1126,8 @@ function normalizeInheritContext(
 	diagnostics: PromptLoaderDiagnostic[],
 ): boolean {
 	if (value === undefined) return false;
-	if (typeof value === "boolean") return value;
-	if (typeof value === "string") {
-		const normalized = value.trim().toLowerCase();
-		if (normalized === "true") return true;
-		if (normalized === "false") return false;
-	}
+	const parsed = parseBooleanValue(value);
+	if (parsed !== undefined) return parsed;
 
 	diagnostics.push(
 		createDiagnostic(
@@ -1879,7 +1755,7 @@ function loadPromptsWithModelFromDir(
 				const parsedModels = chain ? [] : normalizeModelSpecs(frontmatter.model, fullPath, source, diagnostics);
 				if (!chain && hasModelField && !parsedModels) continue;
 				const models = chain ? [] : (parsedModels ?? []);
-				const rotate = chain ? false : normalizeRotate(frontmatter.rotate, fullPath, source, diagnostics);
+				const rotate = chain ? false : normalizeBooleanField(frontmatter.rotate, "rotate", false, fullPath, source, diagnostics);
 
 				const name = entry.name.slice(0, -3);
 				if (RESERVED_COMMAND_NAMES.has(name)) {
@@ -1907,11 +1783,11 @@ function loadPromptsWithModelFromDir(
 						thinking = normalizeThinking(frontmatter.thinking, fullPath, source, diagnostics);
 					}
 				}
-				const restore = normalizeRestore(frontmatter.restore, fullPath, source, diagnostics);
-				const fresh = normalizeFresh(frontmatter.fresh, fullPath, source, diagnostics);
+				const restore = normalizeBooleanField(frontmatter.restore, "restore", true, fullPath, source, diagnostics);
+				const fresh = normalizeBooleanField(frontmatter.fresh, "fresh", false, fullPath, source, diagnostics);
 				const loop = normalizeLoop(frontmatter.loop, fullPath, source, diagnostics);
-				const converge = normalizeConverge(frontmatter.converge, fullPath, source, diagnostics);
-				let boomerang = normalizeBoomerang(frontmatter.boomerang, fullPath, source, diagnostics);
+				const converge = normalizeBooleanField(frontmatter.converge, "converge", true, fullPath, source, diagnostics);
+				let boomerang = normalizeBooleanField(frontmatter.boomerang, "boomerang", false, fullPath, source, diagnostics);
 				if (chain && boomerang) {
 					diagnostics.push(
 						createDiagnostic(
@@ -1935,7 +1811,7 @@ function loadPromptsWithModelFromDir(
 					deterministic = undefined;
 				}
 				const worktreeInput = hasBestOfN ? bestOfN?.worktree : frontmatter.worktree;
-				const worktree = normalizeWorktree(worktreeInput, fullPath, source, diagnostics);
+				const worktree = normalizeBooleanField(worktreeInput, "worktree", false, fullPath, source, diagnostics);
 				let safeWorktree: boolean | undefined;
 				if (worktree) {
 					if (chain) {

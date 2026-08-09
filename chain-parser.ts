@@ -248,36 +248,11 @@ function parseChainSegment(segment: string): ChainStepOrParallel | undefined {
 	return parseSingleStepSegment(segment);
 }
 
-export function parseChainSteps(args: string): ParsedChainSteps {
-	const sharedArgsSplit = splitByTopLevelSeparator(args, " -- ");
-	const templatesPart = sharedArgsSplit[0];
-	const argsPart = sharedArgsSplit.length > 1 ? sharedArgsSplit.slice(1).join(" -- ") : "";
-
+export function parseChainDeclaration(input: string): ParsedChainDeclaration {
 	const invalidSegments: string[] = [];
 	const steps: ChainStepOrParallel[] = [];
 
-	for (const rawSegment of splitByTopLevelSeparator(templatesPart, "->")) {
-		const segment = rawSegment.trim();
-		if (!segment) {
-			invalidSegments.push(rawSegment);
-			continue;
-		}
-		const parsedSegment = parseChainSegment(segment);
-		if (!parsedSegment) {
-			invalidSegments.push(segment);
-			continue;
-		}
-		steps.push(parsedSegment);
-	}
-
-	return { steps, sharedArgs: parseCommandArgs(argsPart), invalidSegments };
-}
-
-export function parseChainDeclaration(chain: string): ParsedChainDeclaration {
-	const invalidSegments: string[] = [];
-	const steps: ChainStepOrParallel[] = [];
-
-	for (const rawSegment of splitByTopLevelSeparator(chain, "->")) {
+	for (const rawSegment of splitByTopLevelSeparator(input, "->")) {
 		const segment = rawSegment.trim();
 		if (!segment) {
 			invalidSegments.push(rawSegment);
@@ -292,4 +267,11 @@ export function parseChainDeclaration(chain: string): ParsedChainDeclaration {
 	}
 
 	return { steps, invalidSegments };
+}
+
+export function parseChainSteps(args: string): ParsedChainSteps {
+	const sharedArgsSplit = splitByTopLevelSeparator(args, " -- ");
+	const templatesPart = sharedArgsSplit[0];
+	const argsPart = sharedArgsSplit.length > 1 ? sharedArgsSplit.slice(1).join(" -- ") : "";
+	return { ...parseChainDeclaration(templatesPart), sharedArgs: parseCommandArgs(argsPart) };
 }
