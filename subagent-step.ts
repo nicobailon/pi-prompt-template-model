@@ -23,6 +23,7 @@ import {
 	type DelegatedSubagentParallelResult,
 	type DelegatedSubagentRequest,
 	type DelegatedSubagentResponse,
+	type DelegatedSubagentStarted,
 	type DelegatedSubagentTask,
 	type DelegatedSubagentTaskProgress,
 	type DelegatedSubagentUpdate,
@@ -399,8 +400,8 @@ async function requestDelegatedRun(
 
 		const onStarted = (data: unknown) => {
 			if (done || !data || typeof data !== "object") return;
-			const requestId = (data as { requestId?: unknown }).requestId;
-			if (requestId !== request.requestId) return;
+			const startedPayload = data as Partial<DelegatedSubagentStarted>;
+			if (startedPayload.requestId !== request.requestId) return;
 			started = true;
 			clearTimeout(startTimeout);
 			updateDelegatedLiveState(request.requestId, {
@@ -409,7 +410,7 @@ async function requestDelegatedRun(
 				recentOutput: [],
 				taskProgress: request.tasks?.map((task, index) => ({ index, agent: task.agent, status: "pending" })) ?? [],
 			});
-			showWidget();
+			if (startedPayload.ownsProgress !== true) showWidget();
 		};
 
 		const onResponse = (data: unknown) => {
