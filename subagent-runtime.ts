@@ -84,6 +84,12 @@ export interface DelegatedSubagentParallelResult {
 	errorText?: string;
 }
 
+export interface DelegatedSubagentStarted {
+	requestId: string;
+	backend?: string;
+	ownsProgress?: boolean;
+}
+
 export interface DelegatedSubagentRequest {
 	requestId: string;
 	ownerRunId?: string;

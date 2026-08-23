@@ -9,6 +9,7 @@
 - Added the prompt invocation event channel for external orchestrators. Thanks @chrisgoddard for #18.
 
 ### Changed
+- Delegated progress widgets now honor producer-owned progress acknowledgements. Thanks to [@chrisgoddard](https://github.com/chrisgoddard) for #28.
 - Simplified internal argument parsing, model identity, delegated-progress helpers, chain parsing, frontmatter boolean parsing, and delegated-result rendering without changing behavior.
 - Prompt observer failures now report non-fatal warnings, and delegated live-state reads now return snapshots.
 
