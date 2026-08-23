@@ -207,6 +207,47 @@ function createContext(
 	};
 }
 
+function createEventInvocationContext(cwd: string, pi: FakePi) {
+	let idle = true;
+	const { ctx } = createContext(cwd, pi);
+	delete (ctx as any).waitForIdle;
+	delete (ctx as any).navigateTree;
+	ctx.isIdle = () => idle;
+	const sendUserMessage = pi.sendUserMessage.bind(pi);
+	pi.sendUserMessage = (content: string) => {
+		sendUserMessage(content);
+		idle = false;
+		setTimeout(() => { idle = true; }, 0);
+	};
+	return ctx;
+}
+
+function collectInvocationEvents(pi: FakePi) {
+	const acknowledgements: any[] = [];
+	const lifecycle: any[] = [];
+	pi.events.on(PROMPT_TEMPLATE_PROMPT_INVOKE_ACK_EVENT, (payload) => acknowledgements.push(payload));
+	pi.events.on(PROMPT_TEMPLATE_PROMPT_STARTED_EVENT, (payload) => lifecycle.push(payload));
+	pi.events.on(PROMPT_TEMPLATE_PROMPT_FINISHED_EVENT, (payload) => lifecycle.push(payload));
+	return { acknowledgements, lifecycle };
+}
+
+function emitPromptInvocation(pi: FakePi, requestId: string, name: string, args?: string) {
+	pi.events.emit(PROMPT_TEMPLATE_PROMPT_INVOKE_REQUEST_EVENT, {
+		protocolVersion: PROMPT_TEMPLATE_PROMPT_INVOKE_PROTOCOL_VERSION,
+		requestId,
+		name,
+		...(args !== undefined ? { args } : {}),
+	});
+}
+
+async function waitForLifecycleCount(lifecycle: any[], count: number) {
+	const deadline = Date.now() + 5000;
+	while (lifecycle.length < count && Date.now() < deadline) {
+		await new Promise((resolve) => setTimeout(resolve, 10));
+	}
+	assert.equal(lifecycle.length, count);
+}
+
 test("direct prompt command waits for tracked compaction before sending user message", async () => {
 	await withTempHome(async (root) => {
 		const cwd = join(root, "project");
@@ -472,6 +513,166 @@ test("refuses chain-template invocation requests without starting a run", async 
 		assert.equal(acknowledgements[0].accepted, false);
 		assert.equal(acknowledgements[0].reason, "chain-template");
 		assert.deepEqual(lifecycle, []);
+	});
+});
+
+test("refuses deterministic invocation without timeout before accepting", async () => {
+	await withTempHome(async (root) => {
+		const cwd = join(root, "project");
+		mkdirSync(join(cwd, ".pi", "prompts"), { recursive: true });
+		writeFileSync(join(cwd, ".pi", "prompts", "unsafe.md"), "---\nrun: node -e 'setTimeout(() => {}, 1000)'\nhandoff: never\n---\nunsafe");
+		writeFileSync(join(cwd, ".pi", "prompts", "plain.md"), `---\nmodel: ${MODEL_ID}\n---\nplain`);
+
+		const pi = new FakePi();
+		const { acknowledgements, lifecycle } = collectInvocationEvents(pi);
+		promptModelExtension(pi as never);
+		const ctx = createEventInvocationContext(cwd, pi);
+		await pi.emit("session_start", {}, ctx);
+
+		emitPromptInvocation(pi, "unsafe-no-timeout", "unsafe");
+		assert.deepEqual(acknowledgements, [{
+			protocolVersion: PROMPT_TEMPLATE_PROMPT_INVOKE_PROTOCOL_VERSION,
+			requestId: "unsafe-no-timeout",
+			name: "unsafe",
+			accepted: false,
+			reason: "unsupported-context",
+		}]);
+		assert.deepEqual(lifecycle, []);
+
+		emitPromptInvocation(pi, "plain-after-unsafe", "plain");
+		await waitForLifecycleCount(lifecycle, 2);
+		assert.equal(acknowledgements[1]!.accepted, true);
+		assert.notEqual(acknowledgements[1]!.reason, "busy");
+	});
+});
+
+test("accepts deterministic invocation with timeout and releases busy state", async () => {
+	await withTempHome(async (root) => {
+		const cwd = join(root, "project");
+		mkdirSync(join(cwd, ".pi", "prompts"), { recursive: true });
+		writeFileSync(join(cwd, ".pi", "prompts", "timed.md"), [
+			"---",
+			"deterministic:",
+			"  run:",
+			"    command: node",
+			"    args:",
+			"      - -e",
+			"      - 'setTimeout(() => {}, 1000)'",
+			"  handoff: never",
+			"  timeout: 10",
+			"---",
+			"timed",
+		].join("\n"));
+		writeFileSync(join(cwd, ".pi", "prompts", "plain.md"), `---\nmodel: ${MODEL_ID}\n---\nplain`);
+
+		const pi = new FakePi();
+		const customMessages: any[] = [];
+		pi.sendMessage = (message: any) => {
+			customMessages.push(message);
+		};
+		const { acknowledgements, lifecycle } = collectInvocationEvents(pi);
+		promptModelExtension(pi as never);
+		const ctx = createEventInvocationContext(cwd, pi);
+		await pi.emit("session_start", {}, ctx);
+
+		emitPromptInvocation(pi, "timed-run", "timed");
+		await waitForLifecycleCount(lifecycle, 2);
+		assert.equal(acknowledgements[0]!.accepted, true);
+		assert.equal(lifecycle[0]!.runId, acknowledgements[0]!.runId);
+		assert.equal(lifecycle[1]!.runId, acknowledgements[0]!.runId);
+		assert.equal(lifecycle[1]!.status, "failed");
+		assert.equal(customMessages.some((message) => message.details?.timedOut === true), true);
+
+		emitPromptInvocation(pi, "plain-after-timeout", "plain");
+		await waitForLifecycleCount(lifecycle, 4);
+		assert.equal(acknowledgements[1]!.accepted, true);
+		assert.notEqual(acknowledgements[1]!.reason, "busy");
+	});
+});
+
+test("refuses frontmatter delegated invocation before accepting", async () => {
+	await withTempHome(async (root) => {
+		const cwd = join(root, "project");
+		mkdirSync(join(cwd, ".pi", "prompts"), { recursive: true });
+		writeFileSync(join(cwd, ".pi", "prompts", "delegated.md"), `---\nmodel: ${MODEL_ID}\nsubagent: true\n---\ndelegated`);
+		writeFileSync(join(cwd, ".pi", "prompts", "plain.md"), `---\nmodel: ${MODEL_ID}\n---\nplain`);
+
+		const pi = new FakePi();
+		const { acknowledgements, lifecycle } = collectInvocationEvents(pi);
+		promptModelExtension(pi as never);
+		const ctx = createEventInvocationContext(cwd, pi);
+		await pi.emit("session_start", {}, ctx);
+
+		emitPromptInvocation(pi, "delegated-frontmatter", "delegated");
+		assert.equal(acknowledgements[0]!.accepted, false);
+		assert.equal(acknowledgements[0]!.reason, "unsupported-context");
+		assert.deepEqual(lifecycle, []);
+
+		emitPromptInvocation(pi, "plain-after-delegated", "plain");
+		await waitForLifecycleCount(lifecycle, 2);
+		assert.equal(acknowledgements[1]!.accepted, true);
+		assert.notEqual(acknowledgements[1]!.reason, "busy");
+	});
+});
+
+test("refuses runtime delegated invocation overrides before accepting", async () => {
+	await withTempHome(async (root) => {
+		const cwd = join(root, "project");
+		mkdirSync(join(cwd, ".pi", "prompts"), { recursive: true });
+		writeFileSync(join(cwd, ".pi", "prompts", "plain.md"), `---\nmodel: ${MODEL_ID}\n---\nplain`);
+
+		const pi = new FakePi();
+		const { acknowledgements, lifecycle } = collectInvocationEvents(pi);
+		promptModelExtension(pi as never);
+		const ctx = createEventInvocationContext(cwd, pi);
+		await pi.emit("session_start", {}, ctx);
+
+		emitPromptInvocation(pi, "runtime-subagent", "plain", "--subagent worker");
+		emitPromptInvocation(pi, "runtime-fork", "plain", "--fork");
+		assert.equal(acknowledgements[0]!.accepted, false);
+		assert.equal(acknowledgements[0]!.reason, "unsupported-context");
+		assert.equal(acknowledgements[1]!.accepted, false);
+		assert.equal(acknowledgements[1]!.reason, "unsupported-context");
+		assert.deepEqual(lifecycle, []);
+
+		emitPromptInvocation(pi, "plain-after-runtime", "plain");
+		await waitForLifecycleCount(lifecycle, 2);
+		assert.equal(acknowledgements[2]!.accepted, true);
+		assert.notEqual(acknowledgements[2]!.reason, "busy");
+	});
+});
+
+test("refuses compare-lineup invocation before accepting", async () => {
+	await withTempHome(async (root) => {
+		const cwd = join(root, "project");
+		mkdirSync(join(cwd, ".pi", "prompts"), { recursive: true });
+		writeFileSync(join(cwd, ".pi", "prompts", "compare.md"), [
+			"---",
+			"bestOfN:",
+			"  workers:",
+			"    - agent: delegate",
+			"  reviewers:",
+			"    - agent: reviewer",
+			"---",
+			"$@",
+		].join("\n"));
+		writeFileSync(join(cwd, ".pi", "prompts", "plain.md"), `---\nmodel: ${MODEL_ID}\n---\nplain`);
+
+		const pi = new FakePi();
+		const { acknowledgements, lifecycle } = collectInvocationEvents(pi);
+		promptModelExtension(pi as never);
+		const ctx = createEventInvocationContext(cwd, pi);
+		await pi.emit("session_start", {}, ctx);
+
+		emitPromptInvocation(pi, "compare-lineup", "compare", "fix bug");
+		assert.equal(acknowledgements[0]!.accepted, false);
+		assert.equal(acknowledgements[0]!.reason, "unsupported-context");
+		assert.deepEqual(lifecycle, []);
+
+		emitPromptInvocation(pi, "plain-after-compare", "plain");
+		await waitForLifecycleCount(lifecycle, 2);
+		assert.equal(acknowledgements[1]!.accepted, true);
+		assert.notEqual(acknowledgements[1]!.reason, "busy");
 	});
 });
 

@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- Prompt invocation events now fail closed before acknowledgement for deterministic templates without `timeout` and delegated execution paths, preventing accepted event requests from leaving the channel busy forever. Thanks to [@chrisgoddard](https://github.com/chrisgoddard) for #27.
+
 ## [0.12.0] - 2026-08-09
 
 ### Added

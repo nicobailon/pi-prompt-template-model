@@ -356,6 +356,16 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 			});
 			return;
 		}
+		if (promptInvocationRequiresUnboundedExecution(prompt, request.args ?? "")) {
+			emitPromptInvocationAcknowledgement(pi, ctx, {
+				protocolVersion: PROMPT_TEMPLATE_PROMPT_INVOKE_PROTOCOL_VERSION,
+				requestId: request.requestId,
+				name: request.name,
+				accepted: false,
+				reason: "unsupported-context",
+			});
+			return;
+		}
 
 		const runId = randomUUID();
 		promptActive = true;
@@ -369,6 +379,21 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 		void runPromptCommand(request.name, request.args ?? "", ctx, runId, true, prompt).catch(() => {
 			// Invocation errors are reported through the lifecycle event and must not become unhandled rejections.
 		});
+	}
+
+	function hasCompareLineup(prompt: Pick<PromptWithModel, "workers" | "reviewers" | "finalApplier">): boolean {
+		return prompt.workers !== undefined || prompt.reviewers !== undefined || prompt.finalApplier !== undefined;
+	}
+
+	function promptInvocationRequiresUnboundedExecution(prompt: PromptWithModel, args: string): boolean {
+		const subagent = extractSubagentOverride(args);
+		return (
+			(prompt.deterministic !== undefined && prompt.deterministic.timeoutMs === undefined) ||
+			prompt.subagent !== undefined ||
+			subagent.override !== undefined ||
+			subagent.fork ||
+			hasCompareLineup(prompt)
+		);
 	}
 
 	function consumePendingSkillMessage() {
@@ -1783,8 +1808,8 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 			}
 		}
 
-		const hasCompareLineup = prompt.workers !== undefined || prompt.reviewers !== undefined || prompt.finalApplier !== undefined;
-		if (hasCompareLineup) {
+		const isComparePrompt = hasCompareLineup(prompt);
+		if (isComparePrompt) {
 			await runComparePrompt(
 				name,
 				prompt,
