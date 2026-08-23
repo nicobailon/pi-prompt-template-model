@@ -703,6 +703,12 @@ Looping applies to the entire chain:
 
 Convergence applies across all steps in each iteration — if no step made file changes, the loop stops. Templates are re-read from disk between iterations, so edits take effect live.
 
+## Prompt Invocation Events
+
+External orchestrators can request prompt execution through the prompt invocation event channel. An accepted request emits one `prompt-template:prompt:started` event and one terminal `prompt-template:prompt:finished` event for the acknowledged `runId`.
+
+The event channel fails closed for prompt types that cannot guarantee bounded completion. Deterministic prompts must set `timeout` to be accepted through events. Delegated prompts, runtime `--subagent` or `--fork` invocations, and compare lineups are refused through events for now with `accepted: false` and `reason: "unsupported-context"`. Interactive slash commands keep the existing behavior.
+
 ## Agent Tool
 
 The agent can invoke prompt templates itself via a `run-prompt` tool. It's off by default:
