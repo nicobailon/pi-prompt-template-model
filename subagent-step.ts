@@ -207,7 +207,7 @@ interface PreparedDelegatedTask {
 	agent: string;
 	task: string;
 	context: "fresh" | "fork";
-	model: string;
+	model?: string;
 	skills?: DelegatedSkillBinding[];
 	cwd: string;
 }
@@ -261,13 +261,16 @@ async function prepareDelegatedTask(
 	if (task.taskPrefix) {
 		taskText = `${task.taskPrefix}\n\n${taskText}`;
 	}
+	const model = task.prompt.models.length > 0 || inheritedModel !== undefined
+		? `${prepared.selectedModel.model.provider}/${prepared.selectedModel.model.id}`
+		: undefined;
 
 	return {
 		promptName: task.prompt.name,
 		agent,
 		task: taskText,
 		context: task.prompt.inheritContext ? "fork" : "fresh",
-		model: `${prepared.selectedModel.model.provider}/${prepared.selectedModel.model.id}`,
+		...(model ? { model } : {}),
 		skills: skillBindings,
 		cwd: effectiveCwd,
 	};
@@ -632,7 +635,7 @@ export async function executeSubagentPromptStep(options: DelegatedPromptOptions)
 					return {
 						agent: task.agent,
 						task: task.task,
-						model: task.model,
+						...(task.model ? { model: task.model } : {}),
 						...(skill ? { skill } : {}),
 						cwd: task.cwd,
 					};
@@ -640,7 +643,7 @@ export async function executeSubagentPromptStep(options: DelegatedPromptOptions)
 			}
 			: {}),
 		context: requestContext,
-		model: preparedTasks[0]!.model,
+		...(preparedTasks[0]!.model ? { model: preparedTasks[0]!.model } : {}),
 		cwd: requestCwd,
 		...(options.worktree ? { worktree: true } : {}),
 	};

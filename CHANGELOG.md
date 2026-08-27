@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- Delegated prompt templates without a model now let the target subagent resolve its configured model. Thanks to [@ashlineldridge](https://github.com/ashlineldridge) for #31.
+
 ## [0.12.1] - 2026-08-23
 
 ### Highlights
