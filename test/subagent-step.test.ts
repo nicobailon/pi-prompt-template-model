@@ -129,8 +129,10 @@ test("executeSubagentPromptStep returns delegated change info", async () => {
 	await withDelegationBridge(async (root) => {
 		const pi = createPi();
 		const ctx = createCtx(root);
+		let delegatedRequest: any;
 		pi.events.on(PROMPT_TEMPLATE_SUBAGENT_REQUEST_EVENT, (data) => {
 			const request = data as any;
+			delegatedRequest = request;
 			pi.events.emit(PROMPT_TEMPLATE_SUBAGENT_STARTED_EVENT, { requestId: request.requestId });
 			pi.events.emit(PROMPT_TEMPLATE_SUBAGENT_RESPONSE_EVENT, {
 				...request,
@@ -155,7 +157,37 @@ test("executeSubagentPromptStep returns delegated change info", async () => {
 			currentModel: ctx.model,
 		});
 		assert.equal(result?.changed, true);
+		assert.equal(delegatedRequest.model, "anthropic/claude-sonnet-4-20250514");
 		assert.equal(pi.customMessages.length, 1);
+	});
+});
+
+test("executeSubagentPromptStep omits the session model for model-less delegated prompts", async () => {
+	await withDelegationBridge(async (root) => {
+		const pi = createPi();
+		const ctx = createCtx(root);
+		let request: any;
+
+		pi.events.on(PROMPT_TEMPLATE_SUBAGENT_REQUEST_EVENT, (data) => {
+			request = data;
+			pi.events.emit(PROMPT_TEMPLATE_SUBAGENT_STARTED_EVENT, { requestId: request.requestId });
+			pi.events.emit(PROMPT_TEMPLATE_SUBAGENT_RESPONSE_EVENT, {
+				...request,
+				messages: [{ role: "assistant", content: [{ type: "text", text: "Resolved by agent." }] }],
+				isError: false,
+			});
+		});
+
+		const result = await executeSubagentPromptStep({
+			pi,
+			prompt: { ...prompt, models: [] },
+			args: [],
+			ctx,
+			currentModel: ctx.model,
+		});
+
+		assert.equal(Object.hasOwn(request, "model"), false);
+		assert.equal(result?.text, "Resolved by agent.");
 	});
 });
 

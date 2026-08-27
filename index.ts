@@ -1116,6 +1116,7 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 				ctx,
 				resolveSkillBindings: (skillNames, cwd) => resolveDelegatedSkillBindings(skillNames, cwd, ctx),
 				currentModel: baseModel,
+				inheritedModel: baseModel,
 				signal: ctx.signal,
 				worktree: prompt.worktree === true,
 				allowPartialFailures: true,
@@ -1157,6 +1158,7 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 				ctx,
 				resolveSkillBindings: (skillNames, cwd) => resolveDelegatedSkillBindings(skillNames, cwd, ctx),
 				currentModel: baseModel,
+				inheritedModel: baseModel,
 				signal: ctx.signal,
 				taskPreamble: reviewerPreamble,
 				allowPartialFailures: true,
@@ -1204,6 +1206,7 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 				ctx,
 				resolveSkillBindings: (skillNames, cwd) => resolveDelegatedSkillBindings(skillNames, cwd, ctx),
 				currentModel: baseModel,
+				inheritedModel: baseModel,
 				signal: ctx.signal,
 				taskPreamble: buildFinalApplierPreamble(
 					sharedTask,

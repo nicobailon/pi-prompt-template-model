@@ -98,7 +98,7 @@ export interface DelegatedSubagentRequest {
 	task: string;
 	tasks?: DelegatedSubagentTask[];
 	context: "fresh" | "fork";
-	model: string;
+	model?: string;
 	skill?: string[];
 	cwd: string;
 	result?: { kind: "text" };
@@ -110,7 +110,7 @@ export interface DelegatedSubagentResponse {
 	agent: string;
 	task: string;
 	context: "fresh" | "fork";
-	model: string;
+	model?: string;
 	cwd: string;
 	messages: unknown[];
 	parallelResults?: DelegatedSubagentParallelResult[];
