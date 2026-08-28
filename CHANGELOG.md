@@ -2,8 +2,13 @@
 
 ## [Unreleased]
 
+## [0.12.2] - 2026-08-28
+
+### Highlights
+- Delegated prompts without a template model now respect the target subagent's own model settings.
+
 ### Fixed
-- Delegated prompt templates without a model now let the target subagent resolve its configured model. Thanks to [@ashlineldridge](https://github.com/ashlineldridge) for #31.
+- Delegated prompt templates without a `model` field now let the target subagent choose its configured model instead of forcing the current session model. Thanks to [@ashlineldridge](https://github.com/ashlineldridge) for #31.
 
 ## [0.12.1] - 2026-08-23
 
