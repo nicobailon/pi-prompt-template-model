@@ -2029,14 +2029,6 @@ export default function promptModelExtension(pi: ExtensionAPI) {
 	pi.on("before_agent_start", async (event) => {
 		let systemPrompt = event.systemPrompt;
 
-		if (toolManager.isEnabled() && !loopState && !chainActive) {
-			const toolGuidance = toolManager.getGuidance();
-			const guidance = toolGuidance
-				? `The run-prompt tool is available for running prompt template commands. ${toolGuidance}`
-				: "The run-prompt tool is available for running prompt template commands.";
-			systemPrompt += `\n\n${guidance}`;
-		}
-
 		if (loopState) {
 			const iterText =
 				loopState.totalIterations !== null
