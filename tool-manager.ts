@@ -51,6 +51,10 @@ export function createToolManager(pi: ExtensionAPI, deps: ToolManagerDeps) {
 
 	function ensureRegistered() {
 		if (toolRegistered) return;
+		registerTool();
+	}
+
+	function registerTool() {
 		toolRegistered = true;
 		pi.registerTool({
 			name: "run-prompt",
@@ -63,6 +67,9 @@ export function createToolManager(pi: ExtensionAPI, deps: ToolManagerDeps) {
 				"Use 'chain-prompts template1 -> template2' for chaining and add --chain-context to pass previous step summaries into delegated steps.",
 			promptSnippet:
 				"Use this to run slash/prompt templates by name with args (including --loop/--fresh and chain-prompts flows) when the user asks to execute a prompt template.",
+			promptGuidelines: toolEnabled && toolGuidance
+				? [`For run-prompt: ${toolGuidance}`]
+				: undefined,
 			parameters: Type.Object({
 				command: Type.String({
 					description: "Template name and arguments (e.g. 'deslop --loop 5 --fresh', 'deslop --subagent:worker', 'deslop --subagent', 'chain-prompts analyze -> fix --chain-context', 'chain-prompts analyze -> fix --loop=3')",
@@ -112,7 +119,6 @@ export function createToolManager(pi: ExtensionAPI, deps: ToolManagerDeps) {
 
 				if (trimmed === "on" || trimmed.startsWith("on ")) {
 					toolEnabled = true;
-					ensureRegistered();
 					const guidanceRaw = trimmed.slice("on".length).trim();
 					if (guidanceRaw) {
 						toolGuidance = guidanceRaw.replace(/^["']|["']$/g, "");
@@ -120,12 +126,14 @@ export function createToolManager(pi: ExtensionAPI, deps: ToolManagerDeps) {
 					} else {
 						notify(ctx, "run-prompt tool enabled.", "info");
 					}
+					registerTool();
 					saveToolConfig();
 					return;
 				}
 
 				if (trimmed === "off") {
 					toolEnabled = false;
+					if (toolRegistered) registerTool();
 					saveToolConfig();
 					notify(ctx, "run-prompt tool disabled.", "info");
 					return;
@@ -140,11 +148,13 @@ export function createToolManager(pi: ExtensionAPI, deps: ToolManagerDeps) {
 						}
 					} else if (trimmed === "guidance clear") {
 						toolGuidance = null;
+						if (toolRegistered) registerTool();
 						saveToolConfig();
 						notify(ctx, "Guidance cleared.", "info");
 					} else {
 						const guidanceRaw = trimmed.slice("guidance".length).trim();
 						toolGuidance = guidanceRaw.replace(/^["']|["']$/g, "");
+						if (toolRegistered) registerTool();
 						saveToolConfig();
 						notify(ctx, `Guidance set: "${toolGuidance}"`, "info");
 					}

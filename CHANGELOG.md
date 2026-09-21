@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- `run-prompt` discoverability and optional guidance now use stable tool metadata instead of a per-turn system-prompt override, preventing background notification turns from invalidating the provider cache. Fixes #33.
+
 ## [0.12.2] - 2026-08-28
 
 ### Highlights

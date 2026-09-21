@@ -26,6 +26,8 @@ interface FakeCommand {
 
 interface FakeTool {
 	name: string;
+	promptSnippet?: string;
+	promptGuidelines?: string[];
 	execute: (id: string, params: Record<string, unknown>) => Promise<any>;
 }
 
@@ -2025,10 +2027,27 @@ test("chain cleanup runs even when restore throws", async () => {
 		await assert.rejects(chainPrompts.handler("worker", ctx), /restore-crash/);
 		assert.deepEqual(pi.setModelCalls, ["anthropic/target-model", "anthropic/base-model"]);
 
-		const beforeStart = await pi.emitWithResult("before_agent_start", { systemPrompt: "BASE" }, ctx);
-		assert.ok(beforeStart);
-		assert.match(String(beforeStart.systemPrompt ?? ""), /run-prompt tool is available/i);
-		assert.equal("message" in beforeStart, false);
+		assert.equal(await pi.emitWithResult("before_agent_start", { systemPrompt: "BASE" }, ctx), undefined);
+	});
+});
+
+test("run-prompt guidance stays in tool metadata instead of per-turn system prompts", async () => {
+	await withTempHome(async (root) => {
+		const cwd = join(root, "project");
+		const pi = new FakePi();
+		promptModelExtension(pi as never);
+		const { ctx } = createContext(cwd, pi);
+		await pi.emit("session_start", {}, ctx);
+
+		const promptTool = pi.commands.get("prompt-tool");
+		assert.ok(promptTool);
+		await promptTool.handler("on Prefer review templates.", ctx);
+
+		const runPrompt = pi.tools.get("run-prompt");
+		assert.ok(runPrompt);
+		assert.match(runPrompt.promptSnippet ?? "", /run slash\/prompt templates/i);
+		assert.deepEqual(runPrompt.promptGuidelines, ["For run-prompt: Prefer review templates."]);
+		assert.equal(await pi.emitWithResult("before_agent_start", { systemPrompt: "BASE" }, ctx), undefined);
 	});
 });
 
