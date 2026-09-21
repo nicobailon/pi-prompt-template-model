@@ -2,8 +2,13 @@
 
 ## [Unreleased]
 
+## [0.12.3] - 2026-09-21
+
+### Highlights
+- `run-prompt` stays available during background notifications without disrupting provider prompt caching.
+
 ### Fixed
-- `run-prompt` discoverability and optional guidance now use stable tool metadata instead of a per-turn system-prompt override, preventing background notification turns from invalidating the provider cache. Fixes #33.
+- Background notifications no longer invalidate the provider cache when `run-prompt` guidance is enabled. Fixes #33.
 
 ## [0.12.2] - 2026-08-28
 
