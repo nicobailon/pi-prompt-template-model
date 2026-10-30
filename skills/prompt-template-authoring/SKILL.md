@@ -11,6 +11,17 @@ description: |
 Use this skill when working on prompt templates for `pi-prompt-template-model`.
 Templates are markdown files that register as slash commands.
 
+## Authorization and Local Policy
+
+These examples describe package capabilities, not permission to use them. Before creating or running a template, read the applicable user/project instructions and establish the permitted agents, orchestration mechanism, worktree rules, model policy, side effects, and execution budget.
+
+- Omit `model:` to inherit the current session by default. The model IDs below illustrate syntax; do not copy them as required choices or override a frozen model policy.
+- Use only locally authorized delegation. For example, a scout-only exploration policy does not permit arbitrary delegates, worker/reviewer panels, or a best-of-N final applier. If a controller owns dispatch, use that controller rather than creating an alternate template pipeline.
+- Loops, parallel copies, chains, and best-of-N multiply execution and may incur cost. Agree a finite budget and stop conditions before running them; do not select unlimited loops by default or use retries to evade an existing budget.
+- Deterministic steps execute commands before an LLM turn; `handoff: never` is not a permission bypass. Review their exact command, cwd and effects under the same authorization rules as an interactive action. Do not silently ship, deploy, write, or change credentials just because a template can do so.
+
+If the requested template conflicts with local policy or execution authority is unclear, stop and explain the constraint. Worktree isolation does not itself authorize delegation or side effects. This guidance is not a runtime permission sandbox.
+
 ## Where Templates Live
 
 - `~/.pi/agent/prompts/` — user prompts (highest priority)
